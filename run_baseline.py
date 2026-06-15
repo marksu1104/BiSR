@@ -198,11 +198,19 @@ def run_dackgr(args):
     ]
     enabled_stages = set(args.dackgr_stages or ["process_data", "pretrain_conve", "train_infer"])
     stages = [s for s in all_stages if s[0] in enabled_stages]
+    # Per-dataset fault isolation: a failure (or missing config) in one dataset
+    # is logged and skipped so the remaining datasets still run. This keeps a
+    # single one-shot job over all 6 datasets reliable instead of aborting the
+    # whole run on the first error.
+    failed = []
     for dataset in args.datasets:
+        dataset_failed = None
         for stage, model, script, config_map, action, env_overrides in stages:
             config = config_map.get(dataset)
             if config is None:
-                raise SystemExit(f"No DacKGR {stage} config registered for dataset: {dataset}")
+                print(f"SKIP   | baseline=DacKGR | dataset={dataset} | reason=no {stage} config", flush=True)
+                dataset_failed = f"no {stage} config"
+                break
             cmd = [script, config, action, str(args.gpu)]
             log_file = OUTPUT_DIR / "dackgr" / f"DacKGR_{stage}_{dataset}.log"
             print("=" * 72, flush=True)
@@ -211,20 +219,32 @@ def run_dackgr(args):
             print("Params | " + shlex.join(cmd), flush=True)
             print(f"Log    | {log_file}", flush=True)
             print("=" * 72, flush=True)
-            run_command(
-                cmd,
-                cwd,
-                dry_run=args.dry_run,
-                log_file=log_file,
-                summary_context={"baseline": "DacKGR", "stage": stage, "model": model, "dataset": dataset},
-                env_overrides=env_overrides,
-                show_summary=(stage == "train_infer"),
-                heartbeat_label=f"baseline=DacKGR stage={stage} model={model} dataset={dataset}",
-            )
+            try:
+                run_command(
+                    cmd,
+                    cwd,
+                    dry_run=args.dry_run,
+                    log_file=log_file,
+                    summary_context={"baseline": "DacKGR", "stage": stage, "model": model, "dataset": dataset},
+                    env_overrides=env_overrides,
+                    show_summary=(stage == "train_infer"),
+                    heartbeat_label=f"baseline=DacKGR stage={stage} model={model} dataset={dataset}",
+                )
+            except subprocess.CalledProcessError as exc:
+                print(f"FAILED | baseline=DacKGR | stage={stage} | dataset={dataset} | {exc}", flush=True)
+                dataset_failed = f"{stage} (exit {exc.returncode})"
+                break
             if stage != "train_infer":
                 stage_status = "dry_run" if args.dry_run else "completed"
                 print(f"Time   | {timestamp()}", flush=True)
                 print(f"Done   | baseline=DacKGR | stage={stage} | status={stage_status} | dataset={dataset}", flush=True)
+        if dataset_failed:
+            failed.append((dataset, dataset_failed))
+    if failed:
+        print("=" * 72, flush=True)
+        for dataset, reason in failed:
+            print(f"DacKGR INCOMPLETE | dataset={dataset} | reason={reason}", flush=True)
+        print(f"DacKGR finished with {len(failed)} failed dataset(s); the rest completed.", flush=True)
 
 
 def run_probcbr(args):

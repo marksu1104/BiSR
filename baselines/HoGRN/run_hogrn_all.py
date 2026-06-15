@@ -185,9 +185,21 @@ def main():
     parser.add_argument("--dry_run", action="store_true")
     args = parser.parse_args()
 
+    # Per-dataset fault isolation: a failure in one (dataset, score_func) is
+    # logged and skipped so the remaining runs still complete, keeping a single
+    # one-shot job over all 6 datasets reliable.
+    failed = []
     for dataset in args.datasets:
         for score_func in args.score_funcs:
-            run_one(dataset, score_func, args.gpu, dry_run=args.dry_run)
+            try:
+                run_one(dataset, score_func, args.gpu, dry_run=args.dry_run)
+            except subprocess.CalledProcessError as exc:
+                print(f"FAILED | baseline=HoGRN | model={score_func} | dataset={dataset} | {exc}", flush=True)
+                failed.append((dataset, score_func))
+    if failed:
+        for dataset, score_func in failed:
+            print(f"HoGRN INCOMPLETE | dataset={dataset} | model={score_func}", flush=True)
+        print(f"HoGRN finished with {len(failed)} failed run(s); the rest completed.", flush=True)
 
 
 if __name__ == "__main__":

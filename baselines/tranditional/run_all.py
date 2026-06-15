@@ -39,20 +39,27 @@ DEFAULT_ARGS = {
 # model-specific optimization hyperparameters below are overridden.
 # Sources: Dettmers et al. 2018 ConvE official config (lr=0.003, batch=128),
 #          Balazevic et al. 2019 TuckER official config (lr=0.0005, batch=128).
-# NOTE: ComplEx/TransE/RotatE/ConvE/TuckER use l2=0.0 (not the literature-common
-# 0.01) because this implementation applies l2 as Adam weight_decay directly on
-# the embeddings -- weight_decay=0.01 collapses them to an all-zero degenerate
-# fixed point (loss stuck at ln(2)) within the first epoch.
-# DistMult uses a small l2=1e-5: with l2=0.0 and no other regularization,
-# DistMult on small datasets (e.g. WD-singer) is highly seed-sensitive --
-# training loss can collapse to ~0 within ~6 epochs while valid MRR collapses
-# in the same window, depending on random init (observed MRR range 0.02-0.30
-# across seeds with l2=0.0). l2=1e-5 is 1000x smaller than the collapsing
-# 0.01 and provides enough regularization to avoid the early overfit collapse.
+# NOTE: All models use l2=0.0 (not the literature-common 0.01) because this
+# implementation applies l2 as Adam weight_decay directly on the embeddings --
+# weight_decay=0.01 collapses them to an all-zero degenerate fixed point (loss
+# stuck at ln(2)) within the first epoch.
+#
+# DistMult additionally uses input dropout (0.3) + batch-norm. Reason: in the
+# 1-N (KvsAll) BCE training regime DistMult is the most regularization-
+# sensitive model (Dettmers et al. 2018 ConvE; Ruffinelli et al. 2020). Without
+# dropout/BN it sits on a bifurcation -- on WD-singer ~1/3 of runs overfit
+# within a few epochs and the early-stopped checkpoint collapses to a near-
+# random model (MRR_avg ~0.02), while the rest reach ~0.30. This is NOT a seed
+# issue: the *same* seed flips between the two basins from GPU floating-point
+# nondeterminism alone. Adding inp_drop=0.3 + BN removed every collapse across
+# seeds 0-4 (incl. the two previously-collapsing seeds) and raised MRR_avg to a
+# tight 0.343-0.357 band -- both more stable and higher than any unregularized
+# run. l2 stays 0.0 (a small l2=1e-5 made things worse by zeroing the inverse-
+# relation embeddings). inp_drop/distmult_bn are no-ops for the other models.
 MODEL_CONFIGS = {
     "TransE": {"lr": 1e-3, "l2": 0.0, "batch_size": 256},
     "RotatE": {"lr": 1e-3, "l2": 0.0, "batch_size": 256},
-    "DistMult": {"lr": 1e-3, "l2": 1e-5, "batch_size": 256},
+    "DistMult": {"lr": 1e-3, "l2": 0.0, "batch_size": 256, "inp_drop": 0.3, "distmult_bn": 1},
     "ComplEx": {"lr": 1e-3, "l2": 0.0, "batch_size": 256},
     "ConvE": {"lr": 0.003, "l2": 0.0, "batch_size": 128},
     "TuckER": {"lr": 0.0005, "l2": 0.0, "batch_size": 128},

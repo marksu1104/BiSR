@@ -72,10 +72,27 @@ class DistMult(BaseKGE):
         super(DistMult, self).__init__(args)
         # HoGRN uses a bias term for all entities in DistMult
         self.bias = nn.Parameter(torch.zeros(self.num_ent))
+        # Input/embedding dropout + batch-norm: the standard regularizers for
+        # DistMult in the 1-N (KvsAll) BCE training regime (Dettmers et al. 2018
+        # ConvE; Ruffinelli et al. 2020). Without them DistMult overfits the
+        # training set within a few epochs on small/sparse graphs, collapsing
+        # the saved (early-stopped) model to a near-random state. Defaults are
+        # 0.0 / disabled so behaviour is unchanged unless explicitly enabled.
+        self.inp_drop = nn.Dropout(getattr(args, "inp_drop", 0.0))
+        self.use_bn = getattr(args, "distmult_bn", 0) == 1
+        if self.use_bn:
+            self.bn_ent = nn.BatchNorm1d(self.emb_dim)
+            self.bn_rel = nn.BatchNorm1d(self.emb_dim)
+
+    def _embed(self, idx, emb, bn):
+        x = emb(idx)
+        if self.use_bn:
+            x = bn(x)
+        return self.inp_drop(x)
 
     def forward(self, sub, rel, obj=None):
-        h = self.ent_emb(sub)
-        r = self.rel_emb(rel)
+        h = self._embed(sub, self.ent_emb, self.bn_ent if self.use_bn else None)
+        r = self._embed(rel, self.rel_emb, self.bn_rel if self.use_bn else None)
 
         if obj is not None:
             t = self.ent_emb(obj)
@@ -84,7 +101,7 @@ class DistMult(BaseKGE):
         else:
             # 1-N Scoring
             # (B, D) * (B, D) -> (B, D)
-            hr = h * r 
+            hr = h * r
             # (B, D) @ (D, N) -> (B, N)
             score = torch.mm(hr, self.ent_emb.weight.transpose(1, 0))
             score += self.bias.expand_as(score)
@@ -197,20 +214,9 @@ class ConvE(BaseKGE):
     def forward(self, sub, rel, obj=None):
         h = self.ent_emb(sub).view(-1, 1, self.k_w, self.k_h)
         r = self.rel_emb(rel).view(-1, 1, self.k_w, self.k_h)
-        
-        # Stack h and r: (B, 1, 2*W, H) ? Or (B, 1, H, 2*W)?
-        # Standard: Stack along dimension 2 (Width?)
-        # Let's align with HoGRN ConvE implementation details if available, 
-        # or standard PyG/LibKGE.
-        # Standard: Stack embedding [h; r] -> reshape
-        
-        # Let's flatten first then stack 2D
-        h_flat = self.ent_emb(sub).view(-1, 1, self.emb_dim)
-        r_flat = self.rel_emb(rel).view(-1, 1, self.emb_dim)
-        
-        # Stack 1D then Reshape: (N, 2, D) -> (N, 1, 2*H, W) is weird.
-        # Standard ConvE: reshape(h) -> (N, 1, 10, 10), reshape(r) -> (N, 1, 10, 10)
-        # Concat along dimension 2: (N, 1, 20, 10)
+
+        # Stack h and r along the height dim, ConvE-style:
+        # reshape(h)/(r) -> (B, 1, k_w, k_h), concat -> (B, 1, 2*k_w, k_h)
         stacked_inputs = torch.cat([h, r], 2) # (B, 1, 2*k_w, k_h)
         
         x = self.bn0(stacked_inputs)
@@ -330,27 +336,33 @@ class RotatE(BaseKGE):
             # Training Mode (Pairwise)
             t = self.ent_emb(obj)
             re_tail, im_tail = torch.chunk(t, 2, dim=-1)
-            
+
             re_diff = re_score - re_tail
             im_diff = im_score - im_tail
-            diff = torch.cat([re_diff, im_diff], dim=1)
-            dist = torch.norm(diff, p=1, dim=1)
-            
+            # RotatE distance: sum over dims of the per-dim COMPLEX modulus
+            # sqrt(re^2 + im^2) (Sun et al. 2019), NOT a flat L1 over the
+            # concatenated real/imag parts. The +eps keeps sqrt's gradient
+            # finite at modulus 0 (candidate == rotated head), which is common
+            # in the 1-N/BCE regime and otherwise produces NaNs.
+            dist = torch.sqrt(re_diff ** 2 + im_diff ** 2 + 1e-12).sum(dim=1)
+
             return self.gamma - dist
         else:
             # Compare with ALL tails
             # all_ents: (num_ent, 2*dim)
             all_re_tail, all_im_tail = torch.chunk(self.ent_emb.weight, 2, dim=-1) # (num_ent, dim)
-            
+
             # re_score: (batch, dim). UNSQUEEZE -> (batch, 1, dim)
             # all_re_tail: UNSQUEEZE -> (1, num_ent, dim)
-            
+
             re_diff = re_score.unsqueeze(1) - all_re_tail.unsqueeze(0)
             im_diff = im_score.unsqueeze(1) - all_im_tail.unsqueeze(0)
-            
-            # Stack and Norm
-            diff = torch.cat([re_diff, im_diff], dim=2) # (batch, num_ent, 2*dim)
-            dist = torch.norm(diff, p=1, dim=2) # (batch, num_ent)
-            
+
+            # Per-dim complex modulus, then sum over dims (batch, num_ent).
+            # +eps keeps sqrt's gradient finite at modulus 0 (this branch is
+            # used for 1-N training, where candidate == rotated head is common
+            # and the bare sqrt(0) gradient is +inf -> NaN).
+            dist = torch.sqrt(re_diff ** 2 + im_diff ** 2 + 1e-12).sum(dim=2)
+
             score = self.gamma - dist
             return torch.sigmoid(score)

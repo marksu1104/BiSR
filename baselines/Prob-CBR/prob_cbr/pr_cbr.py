@@ -2,6 +2,7 @@ import argparse
 import csv
 import numpy as np
 import os
+import random
 import time
 from tqdm import tqdm
 from collections import defaultdict
@@ -864,8 +865,19 @@ if __name__ == '__main__':
     parser.add_argument("--num_paths_to_collect", type=int, default=1000)
     parser.add_argument("--max_path_len", type=int, default=3)
     parser.add_argument("--prevent_loops", type=int, choices=[0, 1], default=1)
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Random seed for reproducibility (Prob-CBR uses "
+                             "np.random.choice for kNN selection and path "
+                             "branching, so this is required for repeatable runs)")
 
     args = parser.parse_args()
+    # Seed globally before any np.random.choice (kNN / path branching) runs, so
+    # the whole pipeline is reproducible from this single point.
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
     # resolve expt_dir: if not provided, prefer SPARSEKGC_OUTPUT_DIR/probcbr
     if args.expt_dir is None:
         sp_out = os.environ.get("SPARSEKGC_OUTPUT_DIR")

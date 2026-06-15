@@ -243,6 +243,8 @@ if __name__ == "__main__":
     parser.add_argument("--eval_freq", type=int, default=1)
     parser.add_argument("--patience", type=int, default=25)
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument("--inp_drop", type=float, default=0.0, help="Input/embedding dropout (DistMult regularization)")
+    parser.add_argument("--distmult_bn", type=int, default=0, help="Enable batch-norm on DistMult embeddings (0/1)")
 
     args = parser.parse_args()
 
