@@ -37,3 +37,7 @@ timings/
 *.dat
 wandb/
 .venv/
+
+# AnyBURL: downloaded JAR + generated data/rules/predictions (code is tracked)
+*.jar
+baselines/AnyBURL/work/
