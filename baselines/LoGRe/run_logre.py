@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+"""
+Run the LoGRe baseline end-to-end for the SparseKGC datasets.
+
+Pipeline per dataset:
+  1. prepare_data  – convert SparseKGC format -> LoGRe format (+ entity2type)
+  2. forward run   – LoGRe on test.triples (tail queries) + score dump
+  3. inverse run   – LoGRe on test_inv.triples (head queries) + score dump
+  4. score         – bidirectional tie-aware metrics via score_struprokgr.evaluate
+  5. upsert CSV    – main protocol metrics -> outputs/logre_metrics.csv
+                     tail-only optimistic  -> outputs/logre_sota_metrics.csv
+
+LoGRe is numpy/CPU (torch used for GPU ansim if available); no GPU required.
+Runs on x86 (short partition).
+WN18RR is not supported by LoGRe (no entity types for it).
+"""
+import argparse
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent.parent
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from log_format import print_start, print_result  # noqa: E402
+from metrics_csv import upsert_metrics_csv        # noqa: E402
+sys.path.insert(0, str(SCRIPT_DIR))
+from prepare_data import prepare          # noqa: E402
+sys.path.insert(0, str(SCRIPT_DIR.parent / "StruProKGR"))
+from score_struprokgr import evaluate    # noqa: E402
+
+SUPPORTED_DATASETS = [
+    "WD-singer", "FB15K-237-10", "FB15K-237-20", "FB15K-237-50", "NELL23K",
+]
+
+LOGRE_DEFAULTS = dict(
+    max_num_programs=1000,
+    num_paths_to_collect=100,
+    max_path_len=3,
+    decay_factor=0.95,
+    max_branch=100,
+)
+
+
+def timestamp():
+    now = datetime.now()
+    return now.strftime("%Y-%m-%d %H:%M:%S") + f",{now.microsecond // 1000:03d}"
+
+
+def metrics_csv_path(suffix=""):
+    root = os.environ.get("SPARSEKGC_OUTPUT_DIR")
+    base = Path(root) if root else (REPO_ROOT / "outputs")
+    base.mkdir(parents=True, exist_ok=True)
+    return base / f"logre{suffix}_metrics.csv"
+
+
+def baseline_log_dir():
+    root = os.environ.get("SPARSEKGC_OUTPUT_DIR")
+    d = (Path(root) / "logre") if root else (REPO_ROOT / "outputs" / "logre")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def run_logre_once(work_dir: Path, dataset: str, test_file: str,
+                   dump_file: Path, out_dir: Path, log_fh, args):
+    """Run LoGRe for one direction (forward or inverse)."""
+    cmd = [
+        sys.executable,
+        str(SCRIPT_DIR / "LoGRe.py"),
+        "--data_dir", str(work_dir.parent),
+        "--dataset", dataset,
+        "--out_dir", str(out_dir),
+        "--test",
+        "--test_file_name", test_file,
+        "--dump_scores_file", str(dump_file),
+        "--name_of_run", f"{dataset}_{test_file.replace('.', '_')}",
+        "--max_num_programs", str(args.max_num_programs),
+        "--num_paths_to_collect", str(args.num_paths_to_collect),
+        "--max_path_len",    str(args.max_path_len),
+        "--decay_factor",    str(args.decay_factor),
+        "--max_branch",      str(args.max_branch),
+    ]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True)
+    sota_line = None
+    for line in proc.stdout:
+        log_fh.write(line)
+        log_fh.flush()
+        if line.startswith("LOGRE_METRICS"):
+            sota_line = line.strip()
+    proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError(f"LoGRe exited {proc.returncode} for {dataset} {test_file}")
+    return sota_line
+
+
+def parse_sota(line):
+    """Extract {mrr, h1, h3, h10} from LOGRE_METRICS stdout line."""
+    if line is None:
+        return None
+    m = {}
+    for key in ("mrr", "h1", "h3", "h10"):
+        pat = rf"{key}=([\d.]+)"
+        match = re.search(pat, line)
+        if match:
+            m[key] = float(match.group(1))
+    return m if m else None
+
+
+def run_one(dataset: str, args):
+    data_root = Path(args.data_root)
+    work_root = Path(args.work_root)
+    out_dir   = baseline_log_dir() / dataset
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Prepare data
+    work_dir = prepare(data_root, work_root, dataset)
+
+    params = (
+        f"max_programs={args.max_num_programs} num_paths={args.num_paths_to_collect} "
+        f"max_len={args.max_path_len} decay={args.decay_factor} max_branch={args.max_branch}"
+    )
+    print_start(timestamp(), "logre", "LoGRe", dataset, params)
+
+    log_file = baseline_log_dir() / f"LoGRe_{dataset}.log"
+    start = time.perf_counter()
+    with log_file.open("w", buffering=1) as log_fh:
+        # 2. Forward run (tail queries: test.triples)
+        fwd_dump = out_dir / "dump_forward.tsv"
+        sota_line = run_logre_once(work_dir, dataset, "test.triples", fwd_dump, out_dir, log_fh, args)
+
+        # 3. Inverse run (head queries: test_inv.triples)
+        inv_dump = out_dir / "dump_inverse.tsv"
+        run_logre_once(work_dir, dataset, "test_inv.triples", inv_dump, out_dir, log_fh, args)
+
+    seconds = time.perf_counter() - start
+
+    # 4. Score under main protocol (bidirectional + tie-aware)
+    res = evaluate(fwd_dump, inv_dump, data_root, dataset)
+
+    final_line = (
+        "FINAL_EVAL_METRICS baseline=logre model=LoGRe dataset={} split=test "
+        "mrr_tail={:.5f} mrr_head={:.5f} mrr_avg={:.5f} "
+        "h1_tail={:.5f} h1_head={:.5f} h1_avg={:.5f} "
+        "h3_tail={:.5f} h3_head={:.5f} h3_avg={:.5f} "
+        "h10_tail={:.5f} h10_head={:.5f} h10_avg={:.5f}".format(
+            dataset,
+            res["tail"]["mrr"], res["head"]["mrr"], res["avg"]["mrr"],
+            res["tail"]["h1"],  res["head"]["h1"],  res["avg"]["h1"],
+            res["tail"]["h3"],  res["head"]["h3"],  res["avg"]["h3"],
+            res["tail"]["h10"], res["head"]["h10"], res["avg"]["h10"],
+        )
+    )
+
+    # 5a. Upsert main-protocol CSV
+    upsert_metrics_csv(str(metrics_csv_path()), [
+        dataset, "LoGRe",
+        f"{res['tail']['mrr']:.5f}", f"{res['head']['mrr']:.5f}", f"{res['avg']['mrr']:.5f}",
+        f"{res['tail']['h1']:.5f}",  f"{res['head']['h1']:.5f}",  f"{res['avg']['h1']:.5f}",
+        f"{res['tail']['h3']:.5f}",  f"{res['head']['h3']:.5f}",  f"{res['avg']['h3']:.5f}",
+        f"{res['tail']['h10']:.5f}", f"{res['head']['h10']:.5f}", f"{res['avg']['h10']:.5f}",
+        f"{seconds:.3f}",
+    ])
+
+    # 5b. Upsert SOTA-protocol CSV (tail-only optimistic from forward run)
+    sota = parse_sota(sota_line)
+    if sota:
+        upsert_metrics_csv(str(metrics_csv_path("_sota")), [
+            dataset, "LoGRe",
+            f"{sota.get('mrr', 0):.5f}", "—", "—",
+            f"{sota.get('h1', 0):.5f}",  "—", "—",
+            f"{sota.get('h3', 0):.5f}",  "—", "—",
+            f"{sota.get('h10', 0):.5f}", "—", "—",
+            "—",
+        ])
+
+    print_result(timestamp(), "logre", "LoGRe", dataset, log_file, None, final_line, seconds, "ok")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run LoGRe baseline over SparseKGC datasets")
+    parser.add_argument("--datasets", nargs="+", default=SUPPORTED_DATASETS)
+    parser.add_argument("--data-root",  default=str(REPO_ROOT / "datasets"))
+    parser.add_argument("--work-root",  default=str(SCRIPT_DIR / "work"))
+    parser.add_argument("--max-num-programs",    type=int, default=LOGRE_DEFAULTS["max_num_programs"],
+                        dest="max_num_programs")
+    parser.add_argument("--num-paths-to-collect", type=int, default=LOGRE_DEFAULTS["num_paths_to_collect"],
+                        dest="num_paths_to_collect")
+    parser.add_argument("--max-path-len",        type=int, default=LOGRE_DEFAULTS["max_path_len"],
+                        dest="max_path_len")
+    parser.add_argument("--decay-factor",        type=float, default=LOGRE_DEFAULTS["decay_factor"],
+                        dest="decay_factor")
+    parser.add_argument("--max-branch",          type=int, default=LOGRE_DEFAULTS["max_branch"],
+                        dest="max_branch")
+    parser.add_argument("--dry_run", action="store_true")
+    args = parser.parse_args()
+
+    unsupported = [d for d in args.datasets if d not in SUPPORTED_DATASETS]
+    if unsupported:
+        print(f"WARNING: LoGRe does not support {unsupported}; they will be skipped.", flush=True)
+        args.datasets = [d for d in args.datasets if d in SUPPORTED_DATASETS]
+
+    failed = []
+    for dataset in args.datasets:
+        try:
+            run_one(dataset, args)
+        except Exception as exc:
+            print(f"FAILED | baseline=LoGRe | dataset={dataset} | {exc}", flush=True)
+            import traceback; traceback.print_exc()
+            failed.append(dataset)
+
+    if failed:
+        print(f"LoGRe finished with {len(failed)} failed dataset(s): {failed}", flush=True)
+
+
+if __name__ == "__main__":
+    main()

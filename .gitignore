@@ -44,3 +44,6 @@ baselines/AnyBURL/work/
 
 # StruProKGR: generated work dir (prepared data, score dumps, cache pickles)
 baselines/StruProKGR/work/
+
+# LoGRe: generated work dir
+baselines/LoGRe/work/

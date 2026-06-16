@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Convert SparseKGC datasets (h t r, tab, no inverses) to StruProKGR format
+Convert SparseKGC datasets (h t r, tab, no inverses) to LoGRe format
 (h t r, tab, WITH explicit inverse triples r_inv) and generate entity2type.txt.
 
 Outputs (written to work_dir/dataset/):
@@ -48,7 +48,7 @@ def _with_inverses(triples):
 
 
 def prepare(src_dir: Path, work_dir: Path, dataset: str) -> Path:
-    """Prepare StruProKGR-format data from SparseKGC dataset.
+    """Prepare LoGRe-format data from SparseKGC dataset.
 
     Returns the work sub-directory for this dataset.
     """

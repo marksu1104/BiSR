@@ -31,6 +31,7 @@ BASELINE_METRICS = {
     "probcbr": OUTPUT_DIR / "probcbr_metrics.csv",
     "anyburl": OUTPUT_DIR / "anyburl_metrics.csv",
     "struprokgr": OUTPUT_DIR / "struprokgr_metrics.csv",
+    "logre": OUTPUT_DIR / "logre_metrics.csv",
 }
 
 DACKGR_PROCESS_CONFIGS = {
@@ -298,9 +299,20 @@ def run_struprokgr(args):
     run_command(cmd, BASE_DIR / "baselines" / "StruProKGR")
 
 
+def run_logre(args):
+    cmd = [
+        python_bin(),
+        "run_logre.py",
+        "--datasets", *args.datasets,
+    ]
+    if args.dry_run:
+        cmd.append("--dry_run")
+    run_command(cmd, BASE_DIR / "baselines" / "LoGRe")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run one SparseKGC baseline with a unified entry point.")
-    parser.add_argument("baseline", choices=["traditional", "hogrn", "dackgr", "probcbr", "anyburl", "struprokgr"])
+    parser.add_argument("baseline", choices=["traditional", "hogrn", "dackgr", "probcbr", "anyburl", "struprokgr", "logre"])
     parser.add_argument("--datasets", nargs="+", default=DATASETS)
     parser.add_argument("--gpu", default="0")
     parser.add_argument("--dry_run", action="store_true")
@@ -342,7 +354,8 @@ def main():
         run_anyburl(args)
     elif args.baseline == "struprokgr":
         run_struprokgr(args)
-
+    elif args.baseline == "logre":
+        run_logre(args)
 
 
 if __name__ == "__main__":
