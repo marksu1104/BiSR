@@ -84,6 +84,10 @@ def run_logre_once(work_dir: Path, dataset: str, test_file: str,
         "--decay_factor",    str(args.decay_factor),
         "--max_branch",      str(args.max_branch),
     ]
+    if getattr(args, "dry_run", False):
+        import shlex
+        print(f"Dry-run | {shlex.join([str(x) for x in cmd])}", flush=True)
+        return None
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True)
     sota_line = None
@@ -138,6 +142,9 @@ def run_one(dataset: str, args):
         run_logre_once(work_dir, dataset, "test_inv.triples", inv_dump, out_dir, log_fh, args)
 
     seconds = time.perf_counter() - start
+
+    if getattr(args, "dry_run", False):
+        return
 
     # 4. Score under main protocol (bidirectional + tie-aware)
     res = evaluate(fwd_dump, inv_dump, data_root, dataset)

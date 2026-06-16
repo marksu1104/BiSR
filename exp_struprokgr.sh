@@ -18,10 +18,13 @@ export TMPDIR="${SLURM_TMPDIR:-/tmp}"
 export TEMP="$TMPDIR"
 export TMP="$TMPDIR"
 
+# x86 venv: has tqdm + numpy; no torch needed (StruProKGR is pure numpy)
+source /storage/professor/csliao/marksu/repro/venv/bin/activate
+
 cd /storage/professor/csliao/marksu/SparseKGC
 mkdir -p logs outputs
 
 DATASETS="${DATASETS:-WD-singer FB15K-237-10 FB15K-237-20 FB15K-237-50 NELL23K}"
 
-python3 -u run_baseline.py struprokgr \
+python -u run_baseline.py struprokgr \
   --datasets $DATASETS

@@ -82,6 +82,10 @@ def run_strupro(work_dir: Path, dataset: str, test_file: str,
         "--diminishing_factor", str(args.diminishing_factor),
         "--decay_factor",     str(args.decay_factor),
     ]
+    if getattr(args, "dry_run", False):
+        import shlex
+        print(f"Dry-run | {shlex.join([str(x) for x in cmd])}", flush=True)
+        return None
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True)
     sota_line = None
@@ -137,6 +141,9 @@ def run_one(dataset: str, args):
         run_strupro(work_dir, dataset, "test_inv.triples", inv_dump, out_dir, log_fh, args)
 
     seconds = time.perf_counter() - start
+
+    if getattr(args, "dry_run", False):
+        return
 
     # 4. Score under main protocol (bidirectional + tie-aware)
     res = evaluate(fwd_dump, inv_dump, data_root, dataset)
@@ -195,6 +202,8 @@ def main():
                         dest="diminishing_factor")
     parser.add_argument("--decay-factor",       type=float, default=STRUPRO_DEFAULTS["decay_factor"],
                         dest="decay_factor")
+    parser.add_argument("--dry_run", action="store_true",
+                        help="Print commands without executing them.")
     args = parser.parse_args()
 
     unsupported = [d for d in args.datasets if d not in SUPPORTED_DATASETS]
