@@ -2,7 +2,7 @@
 #SBATCH --job-name=skgc_struprokgr
 #SBATCH --output=/storage/professor/csliao/marksu/SparseKGC/logs/struprokgr_%j.log
 #SBATCH --partition=short
-#SBATCH --time=08:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --account=csliao
@@ -19,7 +19,7 @@ export TEMP="$TMPDIR"
 export TMP="$TMPDIR"
 
 # x86 venv: has tqdm + numpy; no torch needed (StruProKGR is pure numpy)
-source /storage/professor/csliao/marksu/repro/venv/bin/activate
+source /storage/professor/csliao/marksu/SparseKGC/.venv-x86/bin/activate
 
 cd /storage/professor/csliao/marksu/SparseKGC
 mkdir -p logs outputs

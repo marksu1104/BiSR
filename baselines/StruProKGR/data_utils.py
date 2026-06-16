@@ -102,6 +102,6 @@ def get_inv_relation(r: str, rel_vocab: dict, rev_rel_vocab: dict, dataset_name=
     else:
         inv_rel = r + "_inv"
     if return_type == int:
-        return rel_vocab[inv_rel]
+        return rel_vocab.get(inv_rel)
     else:
         return inv_rel

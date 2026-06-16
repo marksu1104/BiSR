@@ -47,3 +47,10 @@ baselines/StruProKGR/work/
 
 # LoGRe: generated work dir
 baselines/LoGRe/work/
+
+# Local virtual environments (not tracked; created per-architecture on the node)
+.venv/
+.venv-x86/
+
+# Java JDK (not tracked; kept in tools/)
+tools/

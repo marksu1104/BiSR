@@ -348,22 +348,24 @@ class StruPro(object):
             # also remove (e2, r^-1, e1)
             r_inv = get_inv_relation(r, self.rel_vocab, self.rev_rel_vocab, self.args.dataset)
             temp_map = {}  # map from (e2, r_inv) -> outgoing nodes
-            for e2 in e2_list:
-                temp_map[(e2, r_inv)] = self.train_map[e2, r_inv]
-                temp_list = []
-                for e1_dash in self.train_map[e2, r_inv]:
-                    if e1_dash == e1:
-                        continue
-                    else:
-                        temp_list.append(e1_dash)
-                self.train_map[e2, r_inv] = temp_list
+            if r_inv is not None:
+                for e2 in e2_list:
+                    temp_map[(e2, r_inv)] = self.train_map[e2, r_inv]
+                    temp_list = []
+                    for e1_dash in self.train_map[e2, r_inv]:
+                        if e1_dash == e1:
+                            continue
+                        else:
+                            temp_list.append(e1_dash)
+                    self.train_map[e2, r_inv] = temp_list
 
             total_examples += len(e2_list)
             if e1 >= self.args.train_ents:
                 # put it back
                 self.train_map[(e1, r)] = orig_train_e2_list
-                for e2 in e2_list:
-                    self.train_map[(e2, r_inv)] = temp_map[(e2, r_inv)]
+                if r_inv is not None:
+                    for e2 in e2_list:
+                        self.train_map[(e2, r_inv)] = temp_map[(e2, r_inv)]
                 continue  # this entity was not seen during train; skip
  
             all_uniq_programs = list(self.args.precision_map[self.rev_rel_vocab[r]].keys())
@@ -394,8 +396,9 @@ class StruPro(object):
             num_answers.append(len(answers))
             # put it back
             self.train_map[(e1, r)] = orig_train_e2_list
-            for e2 in e2_list:
-                self.train_map[(e2, r_inv)] = temp_map[(e2, r_inv)]
+            if r_inv is not None:
+                for e2 in e2_list:
+                    self.train_map[(e2, r_inv)] = temp_map[(e2, r_inv)]
 
         if self.args.output_per_relation_scores:
             for r, r_scores in per_relation_scores.items():

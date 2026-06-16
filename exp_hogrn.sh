@@ -22,7 +22,7 @@ export TMPDIR="${SLURM_TMPDIR:-/tmp}"
 export TEMP="$TMPDIR"
 export TMP="$TMPDIR"
 
-source /storage/professor/csliao/marksu/.venv/bin/activate
+source /storage/professor/csliao/marksu/SparseKGC/.venv/bin/activate
 export PYTHON_BIN="$(which python)"
 
 cd /storage/professor/csliao/marksu/SparseKGC
