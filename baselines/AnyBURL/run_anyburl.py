@@ -10,6 +10,7 @@ not abort the rest, matching the other one-shot SparseKGC runners.
 """
 import argparse
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -29,7 +30,8 @@ from metrics_csv import upsert_metrics_csv  # noqa: E402
 DATASETS = ["WD-singer", "FB15K-237-10", "WN18RR",
             "FB15K-237-20", "FB15K-237-50", "NELL23K"]
 
-DEFAULT_JAVA = str(REPO_ROOT / "tools" / "jdk-21.0.11+10" / "bin" / "java")
+_JDK_ARCH = "aarch64" if platform.machine() == "aarch64" else "x86"
+DEFAULT_JAVA = str(REPO_ROOT / "tools" / f"jdk-21.0.11+10-{_JDK_ARCH}" / "bin" / "java")
 DEFAULT_JAR = str(SCRIPT_DIR / "AnyBURL-23-1x.jar")
 
 

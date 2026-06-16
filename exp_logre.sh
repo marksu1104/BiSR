@@ -1,13 +1,16 @@
 #!/bin/bash
 #SBATCH --job-name=skgc_logre
 #SBATCH --output=/storage/professor/csliao/marksu/SparseKGC/logs/logre_%j.log
-#SBATCH --partition=short
+#SBATCH --partition=gpu_long
+#SBATCH -w gpu1
 #SBATCH --time=1-00:00:00
+#SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --account=csliao
 #
-# LoGRe baseline (numpy/CPU, torch used for GPU ansim if available).
+# LoGRe baseline. Runs on gpu_long (aarch64) — the GPU is used for the ansim
+# matrix computation (torch.matmul), which is significantly faster than CPU numpy.
 # Results into outputs/logre_metrics.csv (bidirectional, tie-aware)
 # and outputs/logre_sota_metrics.csv (tail-only, optimistic).
 #
@@ -18,8 +21,7 @@ export TMPDIR="${SLURM_TMPDIR:-/tmp}"
 export TEMP="$TMPDIR"
 export TMP="$TMPDIR"
 
-# x86 venv: has tqdm + numpy; torch is optional (used only if CUDA available)
-source /storage/professor/csliao/marksu/SparseKGC/.venv-x86/bin/activate
+source /storage/professor/csliao/marksu/SparseKGC/.venv/bin/activate
 
 cd /storage/professor/csliao/marksu/SparseKGC
 mkdir -p logs outputs
