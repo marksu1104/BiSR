@@ -29,6 +29,8 @@ BASELINE_METRICS = {
     "hogrn": OUTPUT_DIR / "hogrn_metrics.csv",
     "dackgr": OUTPUT_DIR / "dackgr_metrics.csv",
     "probcbr": OUTPUT_DIR / "probcbr_metrics.csv",
+    "anyburl": OUTPUT_DIR / "anyburl_metrics.csv",
+    "struprokgr": OUTPUT_DIR / "struprokgr_metrics.csv",
 }
 
 DACKGR_PROCESS_CONFIGS = {
@@ -269,9 +271,36 @@ def run_probcbr(args):
     run_command(cmd, BASE_DIR / "baselines" / "Prob-CBR")
 
 
+def run_anyburl(args):
+    cmd = [
+        python_bin(),
+        "run_anyburl.py",
+        "--datasets", *args.datasets,
+        "--threads", str(args.anyburl_threads),
+    ]
+    if hasattr(args, "anyburl_learn_time") and args.anyburl_learn_time:
+        cmd += ["--learn-time", str(args.anyburl_learn_time)]
+    if args.dry_run:
+        cmd.append("--dry_run")
+    run_command(cmd, BASE_DIR / "baselines" / "AnyBURL")
+
+
+def run_struprokgr(args):
+    cmd = [
+        python_bin(),
+        "run_struprokgr.py",
+        "--datasets", *args.datasets,
+    ]
+    if hasattr(args, "struprokgr_max_programs") and args.struprokgr_max_programs:
+        cmd += ["--max-num-programs", str(args.struprokgr_max_programs)]
+    if args.dry_run:
+        cmd.append("--dry_run")
+    run_command(cmd, BASE_DIR / "baselines" / "StruProKGR")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run one SparseKGC baseline with a unified entry point.")
-    parser.add_argument("baseline", choices=["traditional", "hogrn", "dackgr", "probcbr"])
+    parser.add_argument("baseline", choices=["traditional", "hogrn", "dackgr", "probcbr", "anyburl", "struprokgr"])
     parser.add_argument("--datasets", nargs="+", default=DATASETS)
     parser.add_argument("--gpu", default="0")
     parser.add_argument("--dry_run", action="store_true")
@@ -286,6 +315,12 @@ def main():
                         help="Prob-CBR-only: build caches/maps without running final symbolic eval.")
     parser.add_argument("--probcbr_no_test", action="store_true",
                         help="Prob-CBR-only: do not pass --test (evaluate dev split if evaluation runs).")
+    parser.add_argument("--anyburl_threads", type=int, default=8,
+                        help="AnyBURL-only: worker threads.")
+    parser.add_argument("--anyburl_learn_time", type=int, default=None,
+                        help="AnyBURL-only: SNAPSHOTS_AT seconds (default: 100).")
+    parser.add_argument("--struprokgr_max_programs", type=int, default=None,
+                        help="StruProKGR-only: max_num_programs (default: 100).")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -303,6 +338,10 @@ def main():
         run_dackgr(args)
     elif args.baseline == "probcbr":
         run_probcbr(args)
+    elif args.baseline == "anyburl":
+        run_anyburl(args)
+    elif args.baseline == "struprokgr":
+        run_struprokgr(args)
 
 
 

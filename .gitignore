@@ -41,3 +41,6 @@ wandb/
 # AnyBURL: downloaded JAR + generated data/rules/predictions (code is tracked)
 *.jar
 baselines/AnyBURL/work/
+
+# StruProKGR: generated work dir (prepared data, score dumps, cache pickles)
+baselines/StruProKGR/work/
