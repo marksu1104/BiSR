@@ -36,11 +36,11 @@ SUPPORTED_DATASETS = [
 ]
 
 STRUPRO_DEFAULTS = dict(
-    max_num_programs=100,
-    max_path_len=6,
-    max_path_branch=30,
+    max_num_programs=1000,
+    max_path_len=3,
+    max_path_branch=3,
     diminishing_factor=0.5,
-    decay_factor=0.2,
+    decay_factor=0.95,
 )
 
 

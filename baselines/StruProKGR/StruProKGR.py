@@ -367,8 +367,17 @@ class StruPro(object):
                     for e2 in e2_list:
                         self.train_map[(e2, r_inv)] = temp_map[(e2, r_inv)]
                 continue  # this entity was not seen during train; skip
- 
-            all_uniq_programs = list(self.args.precision_map[self.rev_rel_vocab[r]].keys())
+
+            rel_name = self.rev_rel_vocab[r]
+            if rel_name not in self.args.precision_map:
+                # relation not seen during training; no programs available
+                self.train_map[(e1, r)] = orig_train_e2_list
+                if r_inv is not None:
+                    for e2 in e2_list:
+                        self.train_map[(e2, r_inv)] = temp_map[(e2, r_inv)]
+                continue
+
+            all_uniq_programs = list(self.args.precision_map[rel_name].keys())
             all_uniq_programs = self.rank_programs(all_uniq_programs, r)
             num_programs.append(len(all_uniq_programs))
             # Now execute the program

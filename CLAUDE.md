@@ -142,16 +142,30 @@ python run_baseline.py struprokgr --datasets WD-singer --dry_run
 | AnyBURL | Done | `outputs/anyburl_metrics.csv` |
 | LoGRe | Done (5 datasets) | `outputs/logre_metrics.csv` |
 | StruProKGR | In progress | Job 176606 running, WD-singer + 4 datasets |
-| PathBSR | Done (tail-only exports) | WD-singer MRR=0.449, WN18RR=0.470, etc. |
+| PathBSR | Done | `outputs/pathbsr_metrics.csv` + `outputs/pathbsr_sota_metrics.csv` |
 
 ---
 
-## Key Results (tail-only MRR, PathBSR vs LoGRe paper)
+## Key Results
 
-| Dataset | PathBSR | LoGRe (reported) | Δ |
+### Main protocol (Bidirectional, Tie-aware, MRR_Avg)
+
+| Dataset | PathBSR | LoGRe |
+|---------|---------|-------|
+| FB15K-237-10 | 0.1636 | 0.1053 |
+| FB15K-237-20 | 0.1855 | 0.1520 |
+| FB15K-237-50 | 0.2260 | 0.2012 |
+| NELL23K | 0.2425 | 0.2023 |
+| WD-singer | 0.3830 | 0.4059 |
+| WN18RR | 0.4561 | — |
+
+### SOTA protocol (Tail-only, Optimistic, MRR_Tail)
+
+| Dataset | PathBSR | LoGRe (our run) | Δ |
 |---------|---------|-----------------|---|
-| FB15K-237-10 | 0.242 | 0.228 | +0.014 ✓ |
-| FB15K-237-20 | 0.272 | 0.261 | +0.011 ✓ |
-| FB15K-237-50 | 0.318 | 0.297 | +0.021 ✓ |
-| NELL23K | 0.282 | 0.259 | +0.023 ✓ |
-| WD-singer | 0.449 | 0.459 | −0.010 ✗ |
+| FB15K-237-10 | 0.2547 | 0.1655 | +0.089 ✓ |
+| FB15K-237-20 | 0.2759 | 0.2291 | +0.047 ✓ |
+| FB15K-237-50 | 0.3192 | 0.2911 | +0.028 ✓ |
+| NELL23K | 0.3017 | 0.2408 | +0.061 ✓ |
+| WD-singer | 0.4670 | 0.4135 | +0.054 ✓ |
+| WN18RR | 0.4884 | — | — |
