@@ -16,10 +16,13 @@ exp=$2
 gpu=$3
 ARGS=${@:4}
 
-if [[ "$model" != "conve" ]]; then
-    echo "SKIP_NON_CONVE: model=$model (只保留 conve)"
-    exit 0
-fi
+case "$model" in
+    conve|tucker|distmult|complex|TransE|PTransE) ;;
+    *)
+        echo "SKIP_UNSUPPORTED_EMB: model=$model"
+        exit 0
+        ;;
+esac
 
 add_reversed_training_edges_flag=''
 if [[ $add_reversed_training_edges = *"True"* ]]; then

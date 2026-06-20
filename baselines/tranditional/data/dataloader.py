@@ -22,6 +22,7 @@ class KGData:
         # Group definitions for 1-N training
         self.train_sr2o = defaultdict(set)
         self.all_sr2o = defaultdict(set)
+        self.all_ro2s = defaultdict(set)
         
         self.process_1N_data()
         
@@ -93,6 +94,7 @@ class KGData:
         for h, r, t in self.train_triples:
             self.train_sr2o[(h, r)].add(t)
             self.all_sr2o[(h, r)].add(t)
+            self.all_ro2s[(r, t)].add(h)
             
         # For validation/test: Add to all_sr2o (for filtering)
         # We also need inverse mappings for filtering if we do tail prediction on inverse relations (which is head prediction)
@@ -101,6 +103,7 @@ class KGData:
         for split_triples in [self.valid_triples, self.test_triples]:
             for h, r, t in split_triples:
                 self.all_sr2o[(h, r)].add(t)
+                self.all_ro2s[(r, t)].add(h)
                 if self.add_inverse:
                     inv_r = r + num_base
                     self.all_sr2o[(t, inv_r)].add(h)
@@ -111,6 +114,7 @@ class TrainDatasetOriginal(Dataset):
     """
     def __init__(self, triples, num_ent, num_neg=1):
         self.triples = triples
+        self.triple_set = set(triples)
         self.num_ent = num_ent
         self.num_neg = num_neg
         
@@ -124,39 +128,64 @@ class TrainDatasetOriginal(Dataset):
         if np.random.rand() < 0.5:
              # Corrupt Head
              neg_h = np.random.randint(0, self.num_ent)
-             while neg_h == h:
+             while neg_h == h or (neg_h, r, t) in self.triple_set:
                  neg_h = np.random.randint(0, self.num_ent)
              return torch.tensor([h, r, t], dtype=torch.long), torch.tensor([neg_h, r, t], dtype=torch.long)
         else:
              # Corrupt Tail
              neg_t = np.random.randint(0, self.num_ent)
-             while neg_t == t:
+             while neg_t == t or (h, r, neg_t) in self.triple_set:
                  neg_t = np.random.randint(0, self.num_ent)
              return torch.tensor([h, r, t], dtype=torch.long), torch.tensor([h, r, neg_t], dtype=torch.long)
 
 
 class TrainDataset(Dataset):
-    def __init__(self, data_dict, num_ent, label_smoothing=0.1):
+    def __init__(self, data_dict, num_ent, label_smoothing=0.1, ls_dackgr=False):
         self.data = list(data_dict.keys()) # (h, r) keys
         self.sr2o = data_dict
         self.num_ent = num_ent
         self.label_smoothing = label_smoothing
-        
+        # ls_dackgr: use DacKGR's smoothing additive (eps/N) instead of the
+        # ConvE-standard (1/N). The standard floor adds total mass ~1.0 across
+        # all negatives (10x stronger negative regularization); DacKGR's eps/N
+        # adds ~0.1, which lets TuckER reach a sharper generalizing solution.
+        self.ls_dackgr = ls_dackgr
+
     def __len__(self):
         return len(self.data)
-        
+
     def __getitem__(self, idx):
         h, r = self.data[idx]
         train_objects = list(self.sr2o[(h, r)])
-        
+
         # Multi-hot Label
         label = torch.zeros(self.num_ent)
         label[train_objects] = 1.0
-        
+
         if self.label_smoothing > 0:
-            label = (1.0 - self.label_smoothing) * label + (1.0 / self.num_ent)
-            
+            add = (self.label_smoothing / self.num_ent) if self.ls_dackgr else (1.0 / self.num_ent)
+            label = (1.0 - self.label_smoothing) * label + add
+
         return torch.tensor([h, r]), label
+
+class HeadEvalDataset(Dataset):
+    """Filtered head queries scored directly as (?, r, t)."""
+    def __init__(self, triples, all_ro2s, num_ent):
+        self.triples = triples
+        self.all_ro2s = all_ro2s
+        self.num_ent = num_ent
+
+    def __len__(self):
+        return len(self.triples)
+
+    def __getitem__(self, idx):
+        h, r, t = self.triples[idx]
+        label = torch.zeros(self.num_ent)
+        true_heads = self.all_ro2s.get((r, t), set())
+        if true_heads:
+            label[list(true_heads)] = 1.0
+        return torch.tensor([h, r, t]), label
+
 
 class EvalDataset(Dataset):
     def __init__(self, triples, all_sr2o, num_ent):

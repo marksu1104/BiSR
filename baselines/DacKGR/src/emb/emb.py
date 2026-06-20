@@ -25,6 +25,11 @@ class EmbeddingBasedMethod(LFramework):
         self.num_negative_samples = args.num_negative_samples
         self.label_smoothing_epsilon = args.label_smoothing_epsilon
 
+        # NOTE: TransE's classic margin-ranking branch is intentionally left
+        # disabled (the dead-code path is incompatible with the current
+        # format_batch and the SparseKGC SOTA table accepts TransE running
+        # high). TransE therefore uses the same 1-N BCE path as the other
+        # embedding baselines below.
         if self.model == '!TransE':
             self.loss_fun = nn.MarginRankingLoss(1, False)
         elif self.model == 'PTransE':

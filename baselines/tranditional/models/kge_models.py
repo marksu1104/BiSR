@@ -64,8 +64,22 @@ class TransE(BaseKGE):
             dist = torch.norm(query - all_ent, p=1, dim=2)
             
             score = self.gamma - dist
-            # HoGRN uses Sigmoid for 1-vs-All BCELoss
+            # Margin-ranking TransE must be ranked with its raw distance score.
+            # Sigmoid saturates in float32 and creates artificial score ties.
+            if getattr(self.args, "loss", "bce") == "margin":
+                return score
+
+            # The legacy 1-vs-All BCE recipe expects probabilities.
             return torch.sigmoid(score)
+
+    def score_heads(self, rel, obj):
+        """Score all candidate heads for (?, r, t) without inverse relations."""
+        r = self.rel_emb(rel)
+        t = self.ent_emb(obj)
+        query = (t - r).unsqueeze(1)
+        candidates = self.ent_emb.weight.unsqueeze(0)
+        return self.gamma - torch.norm(candidates - query, p=1, dim=2)
+
 
 class DistMult(BaseKGE):
     def __init__(self, args):
@@ -245,16 +259,36 @@ class ConvE(BaseKGE):
 class TuckER(BaseKGE):
     def __init__(self, args):
         super(TuckER, self).__init__(args)
+        # Asymmetric dims: relation_dim (d_r) can be smaller than entity_dim
+        # (d_e) to shrink the core tensor W (d_r x d_e x d_e). On sparse splits
+        # the symmetric 200/200 core (~8M params) memorizes the few-k training
+        # triples; a smaller d_r regularizes it (Balazevic et al. 2019).
+        self.rel_dim = getattr(args, "tucker_rel_dim", 0) or self.emb_dim
+        if self.rel_dim != self.emb_dim:
+            self.rel_emb = nn.Embedding(self.num_rel, self.rel_dim)
+        # Match the official implementation initialization.
+        nn.init.xavier_normal_(self.ent_emb.weight.data)
+        nn.init.xavier_normal_(self.rel_emb.weight.data)
         # TuckER Parameters
         # W: Core Tensor (D_r, D_e, D_e)
-        
-        self.W = nn.Parameter(torch.tensor(np.random.uniform(-1, 1, (self.emb_dim, self.emb_dim, self.emb_dim)), 
+
+        self.W = nn.Parameter(torch.tensor(np.random.uniform(-1, 1, (self.rel_dim, self.emb_dim, self.emb_dim)),
                                     dtype=torch.float, device="cuda" if torch.cuda.is_available() else "cpu", requires_grad=True))
         
         self.input_dropout = nn.Dropout(0.3)
         self.hidden_dropout1 = nn.Dropout(0.4)
         self.hidden_dropout2 = nn.Dropout(0.5)
-        
+
+        # Embedding dropout applied on every embedding access (entity input,
+        # relation, AND the output projection matrix). DacKGR's framework wraps
+        # all embedding lookups in EDropout/RDropout (emb_dropout_rate=0.3); this
+        # extra regularization is what keeps TuckER on the plateau long enough to
+        # generalize (grok to ~0.25) instead of overfitting at ~0.22 on sparse
+        # data. The original reimplementation omitted it. 0.0 = off (legacy).
+        self.emb_drop_rate = float(getattr(args, "tucker_emb_drop", 0.0))
+        self.E_dropout = nn.Dropout(self.emb_drop_rate)
+        self.R_dropout = nn.Dropout(self.emb_drop_rate)
+
         self.bn0 = nn.BatchNorm1d(self.emb_dim)
         self.bn1 = nn.BatchNorm1d(self.emb_dim)
 
@@ -263,29 +297,30 @@ class TuckER(BaseKGE):
         # Custom init for core tensor usually random uniform
         
     def forward(self, sub, rel, obj=None):
-        h = self.ent_emb(sub)
+        h = self.E_dropout(self.ent_emb(sub))
         x = self.bn0(h)
         x = self.input_dropout(x)
         x = x.view(-1, 1, self.emb_dim) # (B, 1, D)
 
-        r = self.rel_emb(rel)
+        r = self.R_dropout(self.rel_emb(rel))
         W_mat = torch.mm(r, self.W.view(r.size(1), -1)) # (B, D) * (D, D*D) -> (B, D*D)
         W_mat = W_mat.view(-1, self.emb_dim, self.emb_dim) # (B, D, D)
         W_mat = self.hidden_dropout1(W_mat)
-        
+
         # x * W_mat
         # (B, 1, D) * (B, D, D) -> (B, 1, D)
-        x = torch.bmm(x, W_mat) 
-        x = x.view(-1, self.emb_dim) 
+        x = torch.bmm(x, W_mat)
+        x = x.view(-1, self.emb_dim)
         x = self.bn1(x)
         x = self.hidden_dropout2(x)
-        
+
         if obj is not None:
-            t = self.ent_emb(obj)
-            score = torch.sum(x * t, dim=1) 
+            t = self.E_dropout(self.ent_emb(obj))
+            score = torch.sum(x * t, dim=1)
             return torch.sigmoid(score)
         else:
-            score = torch.mm(x, self.ent_emb.weight.transpose(1, 0))
+            all_ent = self.E_dropout(self.ent_emb.weight)
+            score = torch.mm(x, all_ent.transpose(1, 0))
             return torch.sigmoid(score)
 
 
