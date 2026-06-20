@@ -23,7 +23,7 @@ All experiments run on `gpu_long` (aarch64 GH200). Submit the one-time setup job
 sbatch exp_setup_venv.sh
 ```
 
-This creates `.venv/` inside the repo. After it finishes, all other `exp_*.sh` scripts are ready to use.
+This creates `.venv/` inside the repo from the pinned `requirements.txt`. After it finishes, all other `exp_*.sh` scripts are ready to use. (On aarch64 + CUDA, `torch`/`torch_scatter` may need a matching wheel index — see the notes in `exp_setup_venv.sh`.)
 
 ### 3. Place datasets
 
@@ -119,6 +119,18 @@ Two protocols are used to fill two separate result tables:
 Each baseline runner outputs two CSVs:
 - `outputs/<name>_metrics.csv` — main protocol
 - `outputs/<name>_sota_metrics.csv` — SOTA comparison protocol
+
+The two tables must be computed from the same calibrated checkpoint. Training is
+selected against the paper-comparison validation metric where required; the main
+evaluator remains bidirectional, full-entity filtered, and tie-aware.
+
+**AnyBURL exception:** its measured result is retained even when it differs from
+the paper because AnyBURLs native candidate-list and tie handling are not
+equivalent to full-entity ranking. This is an evaluation-protocol difference, not
+a parameter-reproduction claim.
+
+**TuckER fidelity:** the official FB15k-237 recipe uses `d_e=d_r=200`; `d_r=30`
+applies to WN18/WN18RR. Sparse FB15K-237 subsets therefore keep `d_r=200`.
 
 ---
 

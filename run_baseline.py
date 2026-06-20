@@ -22,7 +22,9 @@ DATASETS = [
 BASE_DIR = Path(__file__).resolve().parent
 DATA_ROOT = BASE_DIR / "datasets"
 
-OUTPUT_DIR = BASE_DIR / "outputs"
+# Output root is env-overridable so concurrent jobs can write to isolated dirs
+# (avoids races on the shared *_metrics.csv); defaults to the repo outputs/.
+OUTPUT_DIR = Path(os.environ.get("SPARSEKGC_OUTPUT_DIR") or (BASE_DIR / "outputs"))
 
 BASELINE_METRICS = {
     "traditional": OUTPUT_DIR / "traditional_metrics.csv",

@@ -9,25 +9,25 @@
 #SBATCH --mem=16G
 #SBATCH --account=csliao
 #
-# One-time setup: create SparseKGC/.venv/ on aarch64 GPU node.
-# After this completes, GPU sbatch scripts will use SparseKGC/.venv instead of ~/marksu/.venv.
+# One-time setup: (re)create SparseKGC/.venv/ on an aarch64 GPU node from the
+# pinned requirements.txt. Run on a GPU node so torch can see CUDA.
+#
+# NOTE: requirements.txt pins exact versions but NOT the package index. On
+# aarch64 + CUDA, torch / torch_scatter may need a matching wheel index, e.g.:
+#   pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+#   pip install torch_scatter==2.1.2 -f https://data.pyg.org/whl/torch-2.5.1+cu124.html
+# If the bulk install below fails on those two, install them manually first,
+# then re-run. After (re)creating .venv, refresh the pins with:
+#   .venv/bin/pip freeze > requirements.txt
 
 set -e
 REPO=/storage/professor/csliao/marksu/SparseKGC
-OLD_VENV=/storage/professor/csliao/marksu/.venv
 
-# Create new venv
 python3 -m venv "$REPO/.venv"
 "$REPO/.venv/bin/pip" install --quiet --upgrade pip
-
-# Install from old venv's pip freeze (handles all packages correctly)
-"$OLD_VENV/bin/pip" freeze 2>/dev/null > /tmp/old_venv_freeze.txt
-echo "Old venv packages:"
-cat /tmp/old_venv_freeze.txt
-
-"$REPO/.venv/bin/pip" install --quiet -r /tmp/old_venv_freeze.txt
+"$REPO/.venv/bin/pip" install --quiet -r "$REPO/requirements.txt"
 
 echo ""
 echo "=== Verification ==="
-"$REPO/.venv/bin/python" -c "import torch, numpy, tqdm; print('torch', torch.__version__, '/ cuda:', torch.cuda.is_available(), '/ numpy', numpy.__version__)"
+"$REPO/.venv/bin/python" -c "import torch, numpy, tqdm, scipy, torch_scatter; print('torch', torch.__version__, '/ cuda:', torch.cuda.is_available(), '/ numpy', numpy.__version__)"
 echo "Setup complete: $REPO/.venv"
