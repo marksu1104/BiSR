@@ -43,6 +43,28 @@ STRUPRO_DEFAULTS = dict(
     decay_factor=0.95,
 )
 
+# Per-dataset hyperparameters from the StruProKGR paper (arXiv:2512.12613).
+# The paper tunes the maximum branch number k per dataset
+#   (k in {3,5,10,15,20,30}; FB10=15, FB20=5, FB50=3, NELL=30, WD=30)
+# and "adheres to the settings in LoGRe" for the remaining hyperparameters
+# (max_num_programs, max_path_len, decay_factor); diminishing_factor=0.5.
+STRUPRO_PER_DATASET = {
+    "FB15K-237-10": dict(max_num_programs=1000, max_path_len=6, max_path_branch=15, decay_factor=0.95, diminishing_factor=0.5),
+    "FB15K-237-20": dict(max_num_programs=500,  max_path_len=5, max_path_branch=5,  decay_factor=0.6,  diminishing_factor=0.5),
+    "FB15K-237-50": dict(max_num_programs=100,  max_path_len=4, max_path_branch=3,  decay_factor=0.8,  diminishing_factor=0.5),
+    "NELL23K":      dict(max_num_programs=100,  max_path_len=6, max_path_branch=30, decay_factor=0.5,  diminishing_factor=0.5),
+    "WD-singer":    dict(max_num_programs=100,  max_path_len=6, max_path_branch=30, decay_factor=0.2,  diminishing_factor=0.5),
+}
+
+
+def apply_per_dataset(dataset: str, args):
+    """Override args with the paper's per-dataset hyperparameters (if defined)."""
+    cfg = STRUPRO_PER_DATASET.get(dataset)
+    if not cfg:
+        return
+    for k, v in cfg.items():
+        setattr(args, k, v)
+
 
 def timestamp():
     now = datetime.now()
@@ -118,6 +140,9 @@ def run_one(dataset: str, args):
     work_root = Path(args.work_root)
     out_dir   = baseline_log_dir() / dataset
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 0. Apply paper's per-dataset hyperparameters
+    apply_per_dataset(dataset, args)
 
     # 1. Prepare data
     work_dir = prepare(data_root, work_root, dataset)

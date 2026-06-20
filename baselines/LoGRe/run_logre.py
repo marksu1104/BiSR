@@ -39,11 +39,32 @@ SUPPORTED_DATASETS = [
 
 LOGRE_DEFAULTS = dict(
     max_num_programs=1000,
-    num_paths_to_collect=100,
+    num_paths_to_collect=1000,
     max_path_len=3,
     decay_factor=0.95,
-    max_branch=100,
+    max_branch=1000,
 )
+
+# Per-dataset hyperparameters from the official LoGRe repo README
+# (https://github.com/gsp2014/LoGRe). These reproduce the paper's reported
+# numbers. max_branch is not set in the README commands, so it uses the
+# LoGRe.py argparse default (1000).
+LOGRE_PER_DATASET = {
+    "FB15K-237-10": dict(max_num_programs=1000, num_paths_to_collect=20000, max_path_len=6, decay_factor=0.95, max_branch=1000),
+    "FB15K-237-20": dict(max_num_programs=500,  num_paths_to_collect=5000,  max_path_len=5, decay_factor=0.6,  max_branch=1000),
+    "FB15K-237-50": dict(max_num_programs=100,  num_paths_to_collect=1000,  max_path_len=4, decay_factor=0.8,  max_branch=1000),
+    "NELL23K":      dict(max_num_programs=100,  num_paths_to_collect=10000, max_path_len=6, decay_factor=0.5,  max_branch=1000),
+    "WD-singer":    dict(max_num_programs=100,  num_paths_to_collect=20000, max_path_len=6, decay_factor=0.2,  max_branch=1000),
+}
+
+
+def apply_per_dataset(dataset: str, args):
+    """Override args with the paper's per-dataset hyperparameters (if defined)."""
+    cfg = LOGRE_PER_DATASET.get(dataset)
+    if not cfg:
+        return
+    for k, v in cfg.items():
+        setattr(args, k, v)
 
 
 def timestamp():
@@ -120,6 +141,9 @@ def run_one(dataset: str, args):
     work_root = Path(args.work_root)
     out_dir   = baseline_log_dir() / dataset
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 0. Apply paper's per-dataset hyperparameters
+    apply_per_dataset(dataset, args)
 
     # 1. Prepare data
     work_dir = prepare(data_root, work_root, dataset)

@@ -3,7 +3,7 @@
 #SBATCH --output=/storage/professor/csliao/marksu/SparseKGC/logs/logre_%j.log
 #SBATCH --partition=gpu_long
 #SBATCH -w gpu1
-#SBATCH --time=1-00:00:00
+#SBATCH --time=3-00:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G

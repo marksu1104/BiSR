@@ -28,6 +28,6 @@ mkdir -p logs outputs
 
 DATASETS="${DATASETS:-WD-singer FB15K-237-10 WN18RR FB15K-237-20 FB15K-237-50 NELL23K}"
 
-python -u baselines/AnyBURL/run_anyburl.py \
+python -u run_baseline.py anyburl \
   --datasets $DATASETS \
-  --threads "${SLURM_CPUS_PER_TASK:-8}"
+  --anyburl_threads "${SLURM_CPUS_PER_TASK:-8}"
