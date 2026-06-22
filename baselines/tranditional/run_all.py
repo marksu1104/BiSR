@@ -24,12 +24,20 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PYTHON_EXEC = sys.executable
 
 DEFAULT_ARGS = {
-    "max_epochs": 500,
+    # Unified training budget across ALL traditional models (fair comparison):
+    # max_epochs 2000 / patience 100 / eval_freq 1 / seed 20. The fast embedding
+    # models early-stop well before 2000; TuckER (slow grok under emb-dropout)
+    # needs the room. patience 100 was chosen by simulating early stopping on the
+    # batch-256 A/B valid curves: patience 100 -> worst-case valid loss 0.0006,
+    # but patience 80 -> 0.0109 (WD-singer has a meaningful late gain ~ep1729 that
+    # needs >80 to capture; below that WD drops under its paper target). Harmless
+    # for the others (best-valid checkpoint is kept regardless).
+    "max_epochs": 2000,
     "emb_dim": 200,
     "batch_size": 256,
     "lr": 1e-3,
     "gpu": 0,
-    "patience": 25,
+    "patience": 100,
     "eval_freq": 1,
     "seed": 20,
 }
@@ -73,18 +81,27 @@ MODEL_CONFIGS = {
     # Dropout(0.3); the reimplementation omitted it and capped at ~0.22 (FB10
     # tail) by overfitting. Adding tucker_emb_drop=0.3 keeps it on the plateau
     # long enough to grok to ~0.255 (FB10 test tail 0.2549 / avg 0.1682, both
-    # >= the 0.252/0.163 DacKGR/HoGRN targets). DacKGR-match knobs: emb_drop 0.3
-    # + batch 512. Label smoothing (ls_dackgr=1) is NOT needed (it slightly hurts).
+    # >= the 0.252/0.163 DacKGR/HoGRN targets). emb_drop 0.3 is the fix; label
+    # smoothing (ls_dackgr=1) is NOT needed (it slightly hurts).
     #
-    # Early stopping (max_epochs 1500, patience 150): TuckER has a long pre-grok
-    # plateau (FB10 valid sits ~0.05 for epochs 55-255 before grokking at ~260),
-    # so the unified patience=25 would kill it on the plateau and collapse it to
-    # ~0.05. The longest no-improvement gap in the FB10 grok was 70 epochs;
-    # patience=150 clears that (and the post-grok ~55-epoch noise gaps) with
-    # margin for datasets whose plateau may differ. FB10 peaks ~epoch 1190, so
-    # early stopping ends it ~1340 well before the 1500 cap.
-    "TuckER": {"lr": 0.0005, "l2": 0.0, "batch_size": 512, "tucker_emb_drop": 0.3,
-               "max_epochs": 1500, "patience": 150, "selection_protocol": "sota"},
+    # TuckER inherits the unified budget (max_epochs 2000 / patience 100 /
+    # batch 256 = DEFAULT_ARGS), so it is consistent with the other models on
+    # every training-budget knob. Its only model-specific settings are lr 5e-4
+    # (TuckER paper) and tucker_emb_drop 0.3 (the fix). batch 256 (not DacKGR's
+    # 512): A/B on FB10 gave the SAME test tail (0.2549) but grok ~40% faster
+    # (peak valid ep714 vs ep1190 at batch 512), so slow datasets aren't cut off.
+    # Full-config A/B (all 6 datasets) matched the paper SOTA tails within 0.003:
+    # FB10 .255 / FB20 .270 / FB50 .316 / NELL .275 / WD .422.
+    "TuckER": {"lr": 0.0005, "l2": 0.0, "tucker_emb_drop": 0.3, "selection_protocol": "sota"},
+}
+
+# Per-(model, dataset) overrides, applied last. WN18RR is a dense/standard
+# benchmark, not a sparse graph; TuckER's emb-dropout (a sparse-graph regularizer)
+# hurts it (~0.34 vs ~0.47 without) and it is not in any sparse-KGC paper's TuckER
+# comparison. Use emb_drop 0 there so TuckER stays in line with the other
+# embeddings on WN18RR (~0.47).
+PER_DATASET_OVERRIDES = {
+    ("TuckER", "WN18RR"): {"tucker_emb_drop": 0.0},
 }
 
 
@@ -172,6 +189,7 @@ def run_experiment(model, dataset, dry_run=False, **kwargs):
     args = DEFAULT_ARGS.copy()
     args.update(kwargs)
     args.update(MODEL_CONFIGS.get(model, {}))
+    args.update(PER_DATASET_OVERRIDES.get((model, dataset), {}))
 
     cmd.extend(["--model", model])
     cmd.extend(["--dataset", dataset])

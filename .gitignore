@@ -62,3 +62,6 @@ external_predictions/
 
 # Java JDK (not tracked; kept in tools/)
 tools/
+
+# Local assistant memory (not project content)
+memory/

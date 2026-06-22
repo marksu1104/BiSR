@@ -136,7 +136,7 @@ python run_baseline.py struprokgr --datasets WD-singer --dry_run
 | Baseline | Status | Notes |
 |----------|--------|-------|
 | TransE, RotatE, DistMult, ComplEx, ConvE | Done | `outputs/traditional_metrics.csv` |
-| **TuckER** | **Fix baked; 6-ds rerun IN FLIGHT** | emb_drop=0.3 grok validated FB10 (tail 0.2549/avg 0.1682). Now rerunning all 6 on gpu_short (jobs 186124 gpu2: WD/FB10/NELL/FB20, 186125 gpu3: FB50, 186126 gpu4: WN18RR), isolated out dirs → merge after. Early stopping patience 150 / max_epochs 1500. |
+| **TuckER** | **FIXED + rerun DONE** | emb_drop=0.3 fix reproduced in full seed-20 rerun: tail FB10 .255 / FB20 .270 / FB50 .316 / NELL .275 / WD .422 (all ≈ paper, Δ≤0.003). WN18RR uses emb_drop=0 (dense set) → .480, in line with peers. Whole traditional table regenerated at seed 20. |
 | HoGRN | Done; rerun PENDING (186027) | Validated; reproducible rerun waits on gpu_long |
 | DacKGR | Done; rerun PENDING (186028) | Validated (0.216≈paper 0.218); rerun waits on gpu_long |
 | Prob-CBR | Done + reproduced | `outputs/probcbr_metrics.csv` (rerun 186025) |
@@ -226,9 +226,20 @@ path `best_model_{model}_{dataset}.pth` had no run-id, so concurrent same-config
 runs overwrote each other (now fixed via `--run_tag`, see below). The valid
 trajectories are per-process and reliable; they are what distinguishes the two.
 
-**Baked into `run_all.py` TuckER config:** emb_drop 0.3, batch 512, lr 0.0005,
-max_epochs 1500, patience 1500, eval_freq 5, seed 20, selection_protocol sota,
-no ls_dackgr. Next: rerun on FB20/50/NELL/WD/WN to confirm generalization.
+**FINAL `run_all.py` config (validated across all 6 datasets):**
+- Unified budget (DEFAULT_ARGS, ALL models): max_epochs 2000, **patience 100**,
+  eval_freq 1, seed 20, batch 256. patience chosen by simulating early stopping
+  on the A/B valid curves: 100 → worst-case valid loss 0.0006; 80 → 0.0109 (WD
+  has a meaningful late gain ~ep1729 needing >80). max_epochs 2000 because slow
+  datasets peak ~ep1750 (FB50/WD); fast ones early-stop sooner.
+- TuckER model-specific: lr 5e-4, **tucker_emb_drop 0.3**, selection sota.
+  **batch 256 not DacKGR's 512** — A/B gave identical FB10 tail (0.2549) but grok
+  ~40% faster, so slow datasets aren't cut off; 256 also = the table default.
+- **`PER_DATASET_OVERRIDES[("TuckER","WN18RR")] = {"tucker_emb_drop": 0.0}`** —
+  WN18RR is dense/standard, not sparse; emb_drop hurts it (0.34 vs 0.48) and it
+  is in no sparse-KGC paper's TuckER comparison, so it uses standard TuckER.
+- no ls_dackgr. Full seed-20 rerun (jobs 186576/577/578 + WN18RR ConvE/TuckER
+  reflow 186674) merged into `outputs/traditional_*.csv`.
 
 ---
 
@@ -255,27 +266,23 @@ added; `src/emb/emb.py` `'!TransE'` left as-is (TransE→BCE, runs high=OK).
 Validated baselines are sealed in `outputs/archive/` (CSVs + `ARCHIVE_MANIFEST.md`
 documenting each vs its paper). Done: **LoGRe, StruProKGR**. The reproducible
 sbatch entry points are the root `exp_*.sh` (all now route through
-`run_baseline.py`, incl. AnyBURL). TuckER diagnostics archived in
-`experiments/tucker_investigation/`.
+`run_baseline.py`, incl. AnyBURL).
 
 ## Next steps (resume here)
 
-1. ✅ DONE: TuckER FB10 grokked (test tail 0.2549 / avg 0.1682); winning config
-   (emb_drop 0.3, no ls) baked into `run_all.py`; checkpoint collision fixed via
-   `--run_tag`.
-2. TuckER 6-dataset GENERALIZATION CHECK in flight on gpu_short (186124/186125/
-   186126, isolated dirs `outputs/_tuck_grp1|_fb50|_wn/`). This only proves the
-   new TuckER config groks across datasets — it is NOT the final reproducibility
-   run. When done: merge TuckER rows, sanity-check each ≈0.25 tail (watch WN18RR
-   — eval_freq=1 + 40k entities may approach the 12h short limit).
-3. **Full traditional reproducibility rerun** = ALL 6 models × 6 datasets at the
-   unified config (**seed 20, eval_freq 1**; TuckER early-stop patience 150 /
-   max_epochs 1500). seed was unified 42→20, so the existing seed-42 numbers for
-   TransE/RotatE/DistMult/ComplEx/ConvE MUST be regenerated too — the whole table
-   becomes one consistent seed-20 run. Run it twice and confirm numbers are
-   stable, then archive traditional.
-4. HoGRN (186027) + DacKGR (186028) reproducibility reruns are STILL REQUIRED
+1. ✅ DONE: TuckER fixed (emb_drop 0.3) and the **full traditional table
+   regenerated at seed 20** (all 6 models × 6 datasets, unified budget). Results
+   merged into `outputs/traditional_*.csv`; verified vs paper (TuckER Δ≤0.003,
+   ConvE within ~0.017; TransE/DistMult run high = accepted protocol artifact).
+   TuckER diagnostics + the per-job isolated dirs have been cleaned up.
+2. **Archive traditional** (seal `outputs/traditional_*.csv` into
+   `outputs/archive/` + manifest). Optional: a second seed-20 pass to double-
+   confirm reproducibility before sealing.
+3. HoGRN (186027) + DacKGR (186028) reproducibility reruns are STILL REQUIRED
    (every baseline gets a rerun → confirm reproducible → archive). Waiting on
    gpu_long. Prob-CBR (186025) + AnyBURL (186030) already reproduced → can be
    archived now.
-5. Compile final tables (`scripts/compile_tables.py`) once all archived.
+4. Compile final tables (`scripts/compile_tables.py`) once all archived.
+
+NOTE: AnyBURL's row in the StruProKGR SOTA table is avg(tail+head), not tail —
+our higher AnyBURL tail is correct, not a repro failure (see local memory).
