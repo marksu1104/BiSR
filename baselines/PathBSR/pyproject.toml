@@ -1,0 +1,18 @@
+[project]
+name = "pathbsr"
+version = "0.1.0"
+description = "PathBSR for sparse knowledge graph completion"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy==1.26.4",
+    "scipy==1.11.4",
+    "pandas>=2.0,<3",
+    "matplotlib>=3.7,<4",
+    "tqdm>=4.66,<5",
+]
+
+[project.scripts]
+pathbsr = "pathbsr.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

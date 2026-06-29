@@ -25,8 +25,8 @@ mkdir -p logs
 python -u scripts/export_bsr_routing_predictions.py \
   --data-root datasets \
   --output-root external_predictions \
-  --models HoGRN TransE ConvE TuckER \
-  --datasets WD-singer FB15K-237-10 WN18RR FB15K-237-20 FB15K-237-50 NELL23K \
+  --models HoGRN TransE ConvE TuckER AnyBURL \
+  --datasets WD-singer FB15K-237-10 FB15K-237-20 FB15K-237-50 NELL23K WN18RR \
   --splits valid test \
   --top-k 200 \
   --seed 42 \

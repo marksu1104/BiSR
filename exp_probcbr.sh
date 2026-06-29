@@ -2,7 +2,7 @@
 #SBATCH --job-name=skgc_probcbr
 #SBATCH --output=/storage/professor/csliao/marksu/SparseKGC/logs/probcbr_%j.log
 #SBATCH --partition=gpu_short
-#SBATCH -w gpu4
+#SBATCH -w gpu2
 #SBATCH --time=12:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8

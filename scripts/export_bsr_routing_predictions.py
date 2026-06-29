@@ -40,6 +40,8 @@ HOGRN_DIR = REPO_ROOT / "baselines" / "HoGRN"
 
 TRAD_MODELS = {"TransE", "ConvE", "TuckER"}
 HOGRN_MODELS = {"HoGRN"}
+ANYBURL_MODELS = {"AnyBURL"}
+ANYBURL_DIR = REPO_ROOT / "baselines" / "AnyBURL"
 HOGRN_SCORE_FUNC_CANDIDATES = ["conve", "distmult", "transe"]
 
 EVAL_BATCH_SIZE = 256
@@ -83,7 +85,7 @@ def parse_args():
                              "checkpoints/ directory when not given or when not found here.")
     parser.add_argument("--output-root", type=str, required=True)
     parser.add_argument("--models", nargs="+", default=["HoGRN", "TransE", "ConvE", "TuckER"],
-                        choices=["HoGRN", "TransE", "ConvE", "TuckER"])
+                        choices=["HoGRN", "TransE", "ConvE", "TuckER", "AnyBURL"])
     parser.add_argument("--datasets", nargs="+", required=True)
     parser.add_argument("--splits", nargs="+", default=["valid", "test"], choices=["valid", "test", "train"])
     parser.add_argument("--top-k", type=int, default=200)
@@ -173,6 +175,15 @@ def resolve_checkpoint(model_name, dataset_name, checkpoint_root):
                     return p, sf
         return None, None
 
+    if model_name in ANYBURL_MODELS:
+        # AnyBURL has no checkpoint; its "artifact" is the BSR prediction files
+        # (predictions-bsr-{valid,test}) produced by baselines/AnyBURL/apply_bsr.py.
+        # Return the dataset work dir as the artifact path.
+        work = ANYBURL_DIR / "work" / dataset_name
+        if (work / "predictions-bsr-test").exists():
+            return work, None
+        return None, None
+
     raise ValueError(f"Unsupported model: {model_name}")
 
 
@@ -245,9 +256,10 @@ class TraditionalAdapter:
         emb_dim = int(state_dict["ent_emb.weight"].shape[1])
         margin = self.TRANSE_MARGIN if model_name == "TransE" else 0.0
 
+        num_rel_ckpt = int(state_dict["rel_emb.weight"].shape[0])
         args = argparse.Namespace(
             num_ent=num_entities,
-            num_rel=num_base_rel * 2,
+            num_rel=num_rel_ckpt,
             emb_dim=emb_dim,
             margin=margin,
         )
@@ -262,6 +274,7 @@ class TraditionalAdapter:
         self.checkpoint_path = checkpoint_path
         self.emb_dim = emb_dim
         self.margin = margin
+        self.num_rel_ckpt = num_rel_ckpt  # may be < 2*num_base_rel for TransE (no inverse)
 
     def describe_config(self):
         bits = [f"checkpoint={self.checkpoint_path.name}", f"emb_dim={self.emb_dim}"]
@@ -270,10 +283,32 @@ class TraditionalAdapter:
         return "; ".join(bits)
 
     @torch.no_grad()
+    def _score_head_transe(self, query_t, r_base):
+        # Head prediction for TransE (no inverse rels): score(e) = -||e + r - t|| for all e.
+        all_e = self.model.ent_emb.weight          # (num_ent, emb_dim)
+        t_emb = self.model.ent_emb(query_t)        # (batch, emb_dim)
+        r_emb = self.model.rel_emb(r_base)         # (batch, emb_dim)
+        target = t_emb - r_emb                     # (batch, emb_dim): expected head position
+        diff = all_e.unsqueeze(0) - target.unsqueeze(1)  # (batch, num_ent, emb_dim)
+        return -torch.norm(diff, dim=-1)            # (batch, num_ent)
+
+    @torch.no_grad()
     def score_batch(self, query_h_bsr, query_r_bsr):
         h = torch.as_tensor(query_h_bsr, dtype=torch.long, device=self.device)
         r = torch.as_tensor(query_r_bsr, dtype=torch.long, device=self.device)
-        scores = self.model(h, r)
+        # TransE has no inverse relations; head queries (r >= num_rel_ckpt) need manual compute.
+        if r.max().item() >= self.num_rel_ckpt:
+            is_head = r >= self.num_rel_ckpt
+            num_ent = self.model.ent_emb.weight.shape[0]
+            scores = torch.empty(len(h), num_ent, device=self.device)
+            if (~is_head).any():
+                idx = (~is_head).nonzero(as_tuple=True)[0]
+                scores[idx] = self.model(h[idx], r[idx])
+            if is_head.any():
+                idx = is_head.nonzero(as_tuple=True)[0]
+                scores[idx] = self._score_head_transe(h[idx], r[idx] - self.num_rel_ckpt)
+        else:
+            scores = self.model(h, r)
         return scores.detach().cpu().numpy()
 
     def close(self):
@@ -380,6 +415,79 @@ class HoGRNAdapter:
             torch.cuda.empty_cache()
 
 
+def _load_anyburl_parse_predictions():
+    _ensure_sys_path(str(REPO_ROOT / "scripts"))  # score_anyburl imports metrics_csv
+    path = ANYBURL_DIR / "score_anyburl.py"
+    spec = importlib.util.spec_from_file_location("score_anyburl", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.parse_predictions
+
+
+class AnyBURLAdapter:
+    """Serves AnyBURL rule-mined predictions as per-query dense score vectors in
+    BSR column order. AnyBURL emits, per (h, r, t), a Heads list (candidates for
+    (?, r, t)) and a Tails list (candidates for (h, r, ?)); entities no rule
+    predicts score 0. We index Tails by (h, r) and Heads by (t, r) in BSR ids, so
+    a tail query (qh=h, qr=r) reads Tails and a head query (qh=t, qr=r+nbr) reads
+    Heads. Scores are raw rule confidences (not on a neural-logit scale).
+    """
+
+    def __init__(self, work_dir, entities, base_relations, top_k):
+        parse_predictions = _load_anyburl_parse_predictions()
+        ent2id = {e: i for i, e in enumerate(entities)}
+        rel2id = {r: i for i, r in enumerate(base_relations)}
+        self.num_ent = len(entities)
+        self.num_base_rel = len(base_relations)
+        self.top_k = top_k
+        self.tail = {}   # (h_id, r_id) -> {ent_id: score}
+        self.head = {}   # (t_id, r_id) -> {ent_id: score}
+        self.pred_files = []
+        for split in ("valid", "test"):
+            pf = Path(work_dir) / f"predictions-bsr-{split}"
+            if not pf.exists():
+                continue
+            self.pred_files.append(pf.name)
+            for h, r, t, heads_list, tails_list in parse_predictions(str(pf)):
+                r_id = rel2id.get(r)
+                if r_id is None:
+                    continue
+                h_id, t_id = ent2id.get(h), ent2id.get(t)
+                if h_id is not None:
+                    d = self.tail.setdefault((h_id, r_id), {})
+                    for e, sc in tails_list:
+                        j = ent2id.get(e)
+                        if j is not None and sc > d.get(j, 0.0):
+                            d[j] = sc
+                if t_id is not None:
+                    d = self.head.setdefault((t_id, r_id), {})
+                    for e, sc in heads_list:
+                        j = ent2id.get(e)
+                        if j is not None and sc > d.get(j, 0.0):
+                            d[j] = sc
+
+    def describe_config(self):
+        return ("predictions={}; top_k_output={}; unpredicted_score=0; "
+                "raw_rule_confidence".format("+".join(self.pred_files) or "none", self.top_k))
+
+    def score_batch(self, query_h_bsr, query_r_bsr):
+        b = len(query_h_bsr)
+        out = np.zeros((b, self.num_ent), dtype=np.float32)
+        for i in range(b):
+            qh = int(query_h_bsr[i]); qr = int(query_r_bsr[i])
+            d = (self.tail.get((qh, qr)) if qr < self.num_base_rel
+                 else self.head.get((qh, qr - self.num_base_rel)))
+            if d:
+                idx = np.fromiter(d.keys(), dtype=np.int64, count=len(d))
+                val = np.fromiter(d.values(), dtype=np.float32, count=len(d))
+                out[i, idx] = val
+        return out
+
+    def close(self):
+        self.tail = None
+        self.head = None
+
+
 def build_adapter(model_name, dataset_name, score_func, checkpoint_path,
                   entities, base_relations, args, device):
     if model_name in TRAD_MODELS:
@@ -387,6 +495,8 @@ def build_adapter(model_name, dataset_name, score_func, checkpoint_path,
     if model_name in HOGRN_MODELS:
         return HoGRNAdapter(dataset_name, score_func, checkpoint_path, args.data_root, args.gpu,
                             entities, base_relations, device)
+    if model_name in ANYBURL_MODELS:
+        return AnyBURLAdapter(checkpoint_path, entities, base_relations, args.top_k)
     raise ValueError(f"Unsupported model: {model_name}")
 
 
@@ -508,7 +618,25 @@ def write_csv(path, header, rows):
         writer.writerows(rows)
 
 
-def write_readme(path, args, source_repo, source_commit, export_time):
+def merge_manifest_rows(path, new_rows, models_in_run):
+    """Combine new_rows with an existing manifest at `path`, dropping existing
+    rows for any model in `models_in_run` (they are being re-exported) and
+    keeping the rest. Lets us add a model without clobbering the others.
+    Returns rows sorted by (model, dataset, split)."""
+    kept = []
+    if path.exists():
+        with open(path, newline="", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            next(reader, None)  # header
+            for row in reader:
+                if row and row[0] not in models_in_run:
+                    kept.append(row)
+    merged = kept + list(new_rows)
+    merged.sort(key=lambda x: (x[0], x[1], x[2]))
+    return merged
+
+
+def write_readme(path, args, source_repo, source_commit, export_time, models=None):
     path.write_text(
         "# BSR Routing/Hybrid-Expert Prediction Export\n\n"
         "This directory contains prediction artifacts exported from SparseKGC\n"
@@ -520,7 +648,7 @@ def write_readme(path, args, source_repo, source_commit, export_time):
         f"- Source repo: {source_repo}\n"
         f"- Source commit: {source_commit}\n"
         f"- Export time (UTC): {export_time}\n"
-        f"- Models: {', '.join(args.models)}\n"
+        f"- Models: {', '.join(models or args.models)}\n"
         f"- Datasets: {', '.join(args.datasets)}\n"
         f"- Splits: {', '.join(args.splits)}\n"
         f"- Seed: {args.seed}\n"
@@ -810,13 +938,19 @@ def main():
     # Reorder manifest columns: header is
     # model,dataset,split,mrr,...,num_queries,summary_file,candidates_file,source_repo,...
     # but we appended [common(8) + [summary,candidates] + tail(9)] = 19 columns matching MANIFEST_HEADER.
-    write_csv(output_root / "prediction_manifest.csv", MANIFEST_HEADER, manifest_rows_root)
+    # Merge with any existing manifest so exporting one model (e.g. AnyBURL)
+    # doesn't drop the previously-exported models.
+    models_in_run = set(args.models)
+    root_manifest_path = output_root / "prediction_manifest.csv"
+    merged_root = merge_manifest_rows(root_manifest_path, manifest_rows_root, models_in_run)
+    write_csv(root_manifest_path, MANIFEST_HEADER, merged_root)
     for split in args.splits:
-        write_csv(output_root / f"{split}_predictions" / "prediction_manifest.csv",
-                  MANIFEST_HEADER, manifest_rows_by_split[split])
+        sp = output_root / f"{split}_predictions" / "prediction_manifest.csv"
+        write_csv(sp, MANIFEST_HEADER, merge_manifest_rows(sp, manifest_rows_by_split[split], models_in_run))
 
+    all_models = sorted({row[0] for row in merged_root}) or args.models
     export_time = datetime.now(timezone.utc).isoformat()
-    write_readme(output_root / "README.md", args, source_repo, source_commit, export_time)
+    write_readme(output_root / "README.md", args, source_repo, source_commit, export_time, models=all_models)
     write_schema(output_root / "SCHEMA.md")
 
     if not manifest_records:

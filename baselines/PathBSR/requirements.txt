@@ -1,0 +1,11 @@
+# Numerical versions recorded for the PathBSR experiment environment.
+numpy==1.26.4
+scipy==1.11.4
+pandas>=2.0,<3
+matplotlib>=3.7,<4
+
+# Progress display only; PathBSR has a no-tqdm fallback with identical scores.
+tqdm>=4.66,<5
+
+# Reproduction of the current correctness suite.
+pytest==7.4.4
