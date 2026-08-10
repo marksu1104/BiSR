@@ -21,9 +21,10 @@ from typing import Any
 
 import numpy as np
 
+
 def find_repo_root() -> Path:
     for candidate in Path(__file__).resolve().parents:
-        if (candidate / "pyproject.toml").is_file() and (candidate / "datasets").is_dir():
+        if (candidate / "pyproject.toml").is_file() and (candidate / "src" / "pathbsr").is_dir():
             return candidate
     raise FileNotFoundError("Could not locate the PathBSR repository root")
 
@@ -33,6 +34,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from pathbsr import DEFAULT_CONFIG, PathBSR, load_dataset  # noqa: E402
 from pathbsr.data import load_dataset_with_audit  # noqa: E402
+from pathbsr.locations import data_root  # noqa: E402
 
 
 DATASETS = ["FB15K-237-10", "FB15K-237-20", "FB15K-237-50", "NELL23K", "WD-singer"]
@@ -40,6 +42,7 @@ ALL_RESULT_DATASETS = DATASETS + ["WN18RR"]
 SELECTED_STRUCTURAL_MODELS = ["TransE", "ConvE", "HoGRN", "PathBSR"]
 WD_CAVEAT = "official split contains train/valid/test overlap caveat; no de-overlap run used"
 MAIN_PROTOCOL = "validation; bidirectional filtered full-entity average-tie evaluation"
+DATA_ROOT = data_root()
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -138,7 +141,7 @@ def metric_row_by_dataset(path: Path) -> dict[str, dict[str, str]]:
 def dataset_statistics() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for dataset in DATASETS:
-        train, valid, test, audit = load_dataset_with_audit(ROOT / "datasets", dataset)
+        train, valid, test, audit = load_dataset_with_audit(DATA_ROOT, dataset)
         all_triples = train + valid + test
         entities = {e for h, _, t in all_triples for e in (h, t)}
         relations = {r for _, r, _ in all_triples}
@@ -319,7 +322,7 @@ def trace_query(model: PathBSR, direction: str, original_h: str, original_r: str
 
 
 def case_studies() -> list[dict[str, Any]]:
-    train, valid, test = load_dataset(ROOT / "datasets", "NELL23K")
+    train, valid, test = load_dataset(DATA_ROOT, "NELL23K")
     model = PathBSR(train, valid, test, config=DEFAULT_CONFIG)
     found: dict[str, dict[str, Any]] = {}
     failure_candidate: dict[str, Any] | None = None

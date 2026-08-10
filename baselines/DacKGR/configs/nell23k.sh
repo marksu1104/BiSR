@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-data_dir="data/NELL23K"
+data_dir="${SPARSEKGC_DACKGR_DATA_ROOT:-data}/NELL23K"
 model="point"
 group_examples_by_query="False"
 use_action_space_bucketing="True"

@@ -36,6 +36,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from pathbsr import DEFAULT_CONFIG, PathBSR, load_dataset  # noqa: E402
 import pathbsr.model as pathbsr_model_module  # noqa: E402
 import pathbsr.paths as pathbsr_paths_module  # noqa: E402
+from pathbsr.locations import data_root, workspace_root  # noqa: E402
 
 
 DATASETS = ["FB15K-237-10", "FB15K-237-20", "FB15K-237-50", "NELL23K", "WD-singer", "WN18RR"]
@@ -58,7 +59,8 @@ CACHE = RESULTS / "cache"
 PATH_COUNT_DIR = RESULTS / "path_count"
 CARDINALITY_DIR = RESULTS / "cardinality"
 ROUTER_DIR = RESULTS / "router"
-EXPORTS = ROOT / "external_predictions"
+DATA_ROOT = data_root()
+EXPORTS = workspace_root() / "external_predictions"
 
 
 def reverse_relation(relation: str) -> str:
@@ -75,7 +77,7 @@ def silence_internal_progress() -> None:
 
 
 def query_relation_map(dataset: str, split: str) -> pd.DataFrame:
-    train, valid, test = load_dataset(ROOT / "datasets", dataset)
+    train, valid, test = load_dataset(DATA_ROOT, dataset)
     triples = {"valid": valid, "test": test}[split]
     rows: list[dict[str, Any]] = []
     for triple_index, (head, relation, tail) in enumerate(triples):
@@ -136,7 +138,7 @@ def ensure_pathbsr_detail(split: str, force: bool = False) -> Path:
     rows: list[dict[str, Any]] = [] if existing.empty or force else existing.to_dict("records")
     for dataset in missing:
         print(f"[router-analysis] generate PathBSR {split} detail for {dataset}", flush=True)
-        train, valid, test = load_dataset(ROOT / "datasets", dataset)
+        train, valid, test = load_dataset(DATA_ROOT, dataset)
         triples = {"valid": valid, "test": test}[split]
         model = PathBSR(train, valid, test, config=DEFAULT_CONFIG)
         total_queries = 2 * len(triples)
@@ -252,8 +254,7 @@ def grouped_bar_facets(
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=len(STRUCTURAL_MODELS), frameon=False)
     fig.tight_layout(rect=[0, 0.07, 1, 1])
-    for suffix in ("png", "pdf"):
-        fig.savefig(out_prefix.with_suffix(f".{suffix}"), dpi=180, bbox_inches="tight")
+    fig.savefig(out_prefix.with_suffix(".png"), dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -429,8 +430,7 @@ def plot_router_summary(summary: pd.DataFrame) -> None:
     ax.grid(True, axis="y", linestyle="--", linewidth=0.6, alpha=0.45)
     ax.legend(loc="lower center", bbox_to_anchor=(0.5, -0.35), ncol=4, frameon=False)
     fig.tight_layout()
-    for suffix in ("png", "pdf"):
-        fig.savefig(ROUTER_DIR / f"per_relation_router_test_summary.{suffix}", dpi=180, bbox_inches="tight")
+    fig.savefig(ROUTER_DIR / "per_relation_router_test_summary.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 

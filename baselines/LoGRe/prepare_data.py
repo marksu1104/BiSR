@@ -15,10 +15,6 @@ Outputs (written to work_dir/dataset/):
 from pathlib import Path
 
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-ENTITY_TYPES_DIR = SCRIPT_DIR.parent / "entity_types"
-
-
 def _inv(r: str) -> str:
     return r[:-4] if r.endswith("_inv") else r + "_inv"
 
@@ -68,12 +64,12 @@ def prepare(src_dir: Path, work_dir: Path, dataset: str) -> Path:
     # inverse test file: (t, h, r_inv) for head-query evaluation
     _write_triples(out / "test_inv.triples", [(t, h, _inv(r)) for h, t, r in test])
 
-    _build_entity2type(out, dataset, train + valid + test)
+    _build_entity2type(src, out, train + valid + test)
     return out
 
 
-def _build_entity2type(out: Path, dataset: str, triples):
-    bundled = ENTITY_TYPES_DIR / f"{dataset}.txt"
+def _build_entity2type(src: Path, out: Path, triples):
+    bundled = src / "metadata" / "entity_types.txt"
     type_map = {}
     if bundled.exists():
         with open(bundled) as f:

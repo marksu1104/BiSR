@@ -1,3 +1,7 @@
+# Modified by SparseKGC contributors in 2026.
+# Changes allow logs to use an explicit project-controlled output directory.
+# See ../../THIRD_PARTY.md.
+
 import logging
 from logging import handlers
 import sys

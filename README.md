@@ -1,145 +1,166 @@
 # SparseKGC
 
-Research project for **PathBSR** — a sparse Knowledge Graph Completion method combining BM25-proxy Case-Based Reasoning with multi-hop path mining, built on the Prob-CBR framework.
+SparseKGC is the research repository for **PathBSR**, a sparse knowledge graph
+completion method that combines BM25-based proxy retrieval with multi-hop path
+reasoning. The repository also contains adapted baseline implementations used in
+the thesis experiments.
 
-**Author:** marksu (Graduate student, Professor csliao's lab)
+The primary repository goal is to regenerate every reported table and figure
+from saved numerical results without rerunning expensive experiments.
 
----
+## Generate the Saved Outputs
 
-## Setup
-
-### 1. Clone and enter the project
-
-```bash
-git clone <repo-url> SparseKGC
-cd SparseKGC
-```
-
-### 2. Create the Python environment (aarch64 GPU node only)
-
-All experiments run on `gpu_long` (aarch64 GH200). Submit the one-time setup job from the **login node**:
+Python 3.12 is the canonical output-generation environment. On a standard Linux
+machine:
 
 ```bash
-sbatch exp_setup_venv.sh
+./setup_env.sh outputs
+source ".venv-$(uname -m)/bin/activate"
+python scripts/generate_outputs.py --check
 ```
 
-This creates `.venv/` inside the repo from the pinned `requirements.txt`. After it finishes, all other `exp_*.sh` scripts are ready to use. (On aarch64 + CUDA, `torch`/`torch_scatter` may need a matching wheel index — see the notes in `exp_setup_venv.sh`.)
+`--check` rebuilds every registered table and figure in a temporary directory
+and compares it byte-for-byte with the committed outputs. It does not change
+files or run experiments.
 
-### 3. Place datasets
-
-Datasets are not tracked by git. Put them under `datasets/`:
-
-```
-datasets/
-├── WD-singer/
-├── FB15K-237-10/
-├── FB15K-237-20/
-├── FB15K-237-50/
-├── WN18RR/
-└── NELL23K/
-```
-
-Each dataset folder must contain `train.txt`, `valid.txt`, `test.txt` in `head\ttail\trelation` tab-separated format.
-
----
-
-## Running Experiments
-
-All baselines are submitted via a single sbatch script each. Results are written to `outputs/` as CSV files.
+To update the generated files from the saved metrics:
 
 ```bash
-sbatch exp_traditional.sh    # TransE / RotatE / DistMult / ComplEx / ConvE / TuckER
-sbatch exp_hogrn.sh          # HoGRN (ConvE score function)
-sbatch exp_dackgr.sh         # DacKGR
-sbatch exp_probcbr.sh        # Prob-CBR
-sbatch exp_anyburl.sh        # AnyBURL (rule mining, Java)
-sbatch exp_struprokgr.sh     # StruProKGR (path-based CBR, numpy)
-sbatch exp_logre.sh          # LoGRe (logical graph reasoning, torch GPU ansim)
+python scripts/generate_outputs.py
+python scripts/generate_outputs.py --tables
+python scripts/generate_outputs.py --figures
 ```
 
-To run a subset of datasets:
+The output layout is:
+
+```text
+results/
+├── metrics/    # Saved final metrics produced by experiment code
+├── tables/     # Generated CSV, Markdown, and LaTeX tables
+└── figures/    # Generated PNG figures
+```
+
+Files in `results/tables/` and `results/figures/` must never be edited by hand.
+The generator rejects unregistered files in those directories.
+
+## Prepare the Datasets
+
+The seven canonical datasets are tracked only under `datasets/` in the shared
+`head`, `tail`, `relation` format. Validate them without writing files:
 
 ```bash
-sbatch --export=ALL,DATASETS="WD-singer NELL23K" exp_hogrn.sh
+python scripts/prepare_datasets.py --check
 ```
 
-All scripts use the unified `.venv/` on `gpu_long` (aarch64). The underlying entry point is `run_baseline.py`:
+Baselines that require different names, column orders, inverse edges, or caches
+create them under the ignored `outputs/preprocessed/` directory. DacKGR's
+working layout can also be prepared and verified directly:
 
 ```bash
-python run_baseline.py <baseline> --datasets <dataset...> [--dry_run]
+python scripts/prepare_datasets.py --baseline dackgr --datasets WN18RR
+python scripts/prepare_datasets.py --baseline dackgr --datasets WN18RR --check
 ```
 
----
+Prepared files are never treated as independent dataset sources. Existing
+prepared files are preserved when they differ; use `--force` only after
+inspecting the reported mismatch. Working data is generated only for datasets
+named in the command that is being run. It consists of ordinary files rather
+than links, is ignored by Git, and can be deleted and regenerated from
+`datasets/`.
 
-## Repository Structure
+## Run Experiments Locally
 
-```
-SparseKGC/
-│
-├── run_baseline.py          # Unified CLI entry point for all baselines
-├── exp_*.sh                 # Slurm sbatch scripts (one per baseline)
-├── exp_setup_venv.sh        # One-time: create .venv/ on GPU node
-│
-├── baselines/
-│   ├── entity_types/        # Shared entity→type files (5 datasets)
-│   ├── AnyBURL/             # Rule mining (Java, aarch64 JDK in tools/)
-│   ├── StruProKGR/          # Structure-aware CBR (numpy, CPU)
-│   ├── LoGRe/               # Logical Graph Reasoning (torch GPU ansim)
-│   ├── Prob-CBR/            # Prob-CBR (GPU)
-│   ├── DacKGR/              # DacKGR (GPU)
-│   ├── HoGRN/               # HoGRN (GPU)
-│   └── tranditional/        # KGE models: TransE/RotatE/DistMult/ComplEx/ConvE/TuckER
-│
-├── scripts/
-│   ├── metrics_csv.py       # Upsert-by-key CSV helper
-│   ├── log_format.py        # Structured stdout logging
-│   └── export_bsr_routing_predictions.py
-│
-├── datasets/                # Not tracked — place dataset folders here
-├── outputs/                 # Not tracked — CSV results written here
-├── logs/                    # Not tracked — sbatch job logs
-├── tools/                   # Not tracked — JDK21 (x86 + aarch64)
-├── .venv/                   # Not tracked — aarch64 Python venv (created by exp_setup_venv.sh)
-│
-├── CLAUDE.md                # Context file for AI coding assistants
-└── README.md                # This file
+Experiment execution is optional and separate from output generation:
+
+```bash
+./setup_env.sh experiments
+source ".venv-$(uname -m)/bin/activate"
+python run_baseline.py pathbsr --datasets NELL23K --dry_run
+python run_baseline.py pathbsr --datasets NELL23K
 ```
 
----
+Omit `--datasets` to run a baseline over the six datasets reported in the
+thesis. The full `FB15K-237` dataset is retained for structural analysis and
+can be requested explicitly when a baseline supports it:
+
+```bash
+python run_baseline.py hogrn --dry_run
+python run_baseline.py dackgr --datasets FB15K-237
+```
+
+The same entry point supports:
+
+```text
+traditional  hogrn  dackgr  probcbr  anyburl  struprokgr  logre  pathbsr
+```
+
+Converted datasets, raw runs, logs, checkpoints, and temporary predictions are
+written under ignored working directories such as `outputs/`. Completed metrics
+selected for the thesis are saved separately under `results/metrics/`.
+
+PyTorch and CUDA wheels are platform dependent. `requirements.txt` records the
+experiment environment used by this project, but a CUDA build compatible with
+the local driver may need to be installed from the official PyTorch index.
+AnyBURL additionally requires Java and the external `AnyBURL-23-1x.jar`; set
+`ANYBURL_JAVA` and `ANYBURL_JAR` when they are not available at the default
+locations.
+
+## Run with Slurm
+
+Slurm is an optional scheduling layer around the same Python entry point:
+
+```bash
+sbatch scripts/slurm/exp_pathbsr.sh
+sbatch --export=ALL,DATASETS="WD-singer NELL23K" scripts/slurm/exp_hogrn.sh
+```
+
+The wrappers contain no personal account, node, or repository path. Site-specific
+options should be supplied to `sbatch`, for example `--account`, `--partition`,
+or `--nodelist`. Set `SPARSEKGC_VENV` when the environment is not located at the
+default architecture-specific path.
 
 ## Evaluation Protocols
 
-Two protocols are used to fill two separate result tables:
+| Protocol | Queries | Tie handling | Filtering |
+| --- | --- | --- | --- |
+| Main | Bidirectional tail and inverse-head queries | Average rank for ties | Full-entity filtered |
+| SOTA comparison | Tail queries only | Optimistic first match | Full-entity filtered |
 
-| Protocol | Table | Queries | Tie-breaking | Filter |
-|----------|-------|---------|--------------|--------|
-| **Main** | Paper primary results | Bidirectional (tail + head via inverse) | Tie-aware average rank | Full-entity filtered |
-| **SOTA comparison** | Literature baseline comparison | Tail-only | Optimistic first-match | Full-entity filtered |
+The protocols are intentionally kept separate. A baseline result is never copied
+between protocols when its native evaluator uses different query or tie semantics.
 
-Each baseline runner outputs two CSVs:
-- `outputs/<name>_metrics.csv` — main protocol
-- `outputs/<name>_sota_metrics.csv` — SOTA comparison protocol
+## Repository Structure
 
-The two tables must be computed from the same calibrated checkpoint. Training is
-selected against the paper-comparison validation metric where required; the main
-evaluator remains bidirectional, full-entity filtered, and tie-aware.
+```text
+SparseKGC/
+├── baselines/                 # Original and adapted baseline implementations
+├── datasets/                  # Tracked canonical splits and input metadata
+├── outputs/
+│   ├── preprocessed/          # Generated baseline-specific dataset formats
+│   └── ...                    # Raw runs, logs, caches, and checkpoints
+├── results/                   # Saved metrics and generated research outputs
+├── scripts/
+│   ├── generate_outputs.py    # Generate or verify every registered output
+│   ├── prepare_datasets.py    # Prepare and verify shared dataset splits
+│   └── slurm/                 # Optional cluster wrappers
+├── run_baseline.py            # Platform-neutral experiment entry point
+├── setup_env.sh               # Output or experiment environment setup
+├── REPRODUCIBILITY.md
+└── THIRD_PARTY.md
+```
 
-**AnyBURL exception:** its measured result is retained even when it differs from
-the paper because AnyBURLs native candidate-list and tie handling are not
-equivalent to full-entity ranking. This is an evaluation-protocol difference, not
-a parameter-reproduction claim.
+See [REPRODUCIBILITY.md](REPRODUCIBILITY.md) for the thesis artifact map and
+[THIRD_PARTY.md](THIRD_PARTY.md) for upstream sources, citations, licenses, and
+known local modifications.
 
-**TuckER fidelity:** the official FB15k-237 recipe uses `d_e=d_r=200`; `d_r=30`
-applies to WN18/WN18RR. Sparse FB15K-237 subsets therefore keep `d_r=200`.
+Project-authored code is MIT licensed. HoGRN and StruProKGR did not publish
+software licenses. Their vendored code is retained with exact provenance to
+make the experiments self-contained, but is explicitly excluded from the root
+MIT grant; see `THIRD_PARTY.md` for the revisions and status.
 
----
+## Current Scope
 
-## Cluster Notes
-
-| Partition | Nodes | Architecture | Time limit | Use |
-|-----------|-------|--------------|------------|-----|
-| `gpu_long` | gpu1 | aarch64 GH200 | 3 days | All experiments (default) |
-| `gpu_short` | gpu2/3/4 | aarch64 GH200 | 12 hours | Quick runs |
-| `short` | A09–A12 | x86\_64 | 24 hours | Login-node tasks only |
-
-**Never `scancel` a job** — it causes node drain. Wait for jobs to finish or time out naturally.
+The saved main, SOTA, and efficiency results are integrated. Structural,
+ablation, and case-study artifacts generated on the separate PathBSR machine
+will be added only with their numerical source files and generating code. The
+thesis draft itself is intentionally excluded from Git.

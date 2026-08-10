@@ -33,9 +33,10 @@ except ModuleNotFoundError as exc:
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from pathbsr import REVERSE_SUFFIX, load_dataset  # noqa: E402
+from pathbsr.locations import data_root, workspace_root  # noqa: E402
 
-DATA = ROOT / "datasets"
-PRED = ROOT / "external_predictions" / "valid_predictions"
+DATA = data_root()
+PRED = workspace_root() / "external_predictions" / "valid_predictions"
 RESULTS = ROOT / "results"
 CACHE_DIR = RESULTS / "cache"
 DIAGNOSTIC_DIR = RESULTS / "diagnostics"
@@ -323,9 +324,7 @@ def plot_fb_pathcount_grouped_bar(long_df):
     )
     fig.tight_layout(rect=[0, 0.08, 1, 1])
     paper_png = PATH_COUNT_DIR / "fb_pathcount_mrr_grouped_bar.png"
-    paper_pdf = PATH_COUNT_DIR / "fb_pathcount_mrr_grouped_bar.pdf"
     fig.savefig(paper_png, dpi=180, bbox_inches="tight")
-    fig.savefig(paper_pdf, bbox_inches="tight")
     plt.close(fig)
     if missing_models:
         print(
@@ -388,9 +387,7 @@ def plot_fb_cardinality_grouped_bar(long_df):
     )
     fig.tight_layout(rect=[0, 0.1, 1, 1])
     paper_png = CARDINALITY_DIR / "fb_cardinality_mrr_grouped_bar.png"
-    paper_pdf = CARDINALITY_DIR / "fb_cardinality_mrr_grouped_bar.pdf"
     fig.savefig(paper_png, dpi=180, bbox_inches="tight")
-    fig.savefig(paper_pdf, bbox_inches="tight")
     plt.close(fig)
     if missing_models:
         print(

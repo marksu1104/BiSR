@@ -1,6 +1,6 @@
 """Shared, human-readable log formatting for SparseKGC baseline runners.
 
-Used by baselines/tranditional/run_all.py, baselines/HoGRN/run_hogrn_all.py,
+Used by baselines/traditional/run_all.py, baselines/HoGRN/run_hogrn_all.py,
 and baselines/Prob-CBR/run_all.py so that all three baselines print results
 in the same compact layout instead of each using its own ad-hoc separators.
 """

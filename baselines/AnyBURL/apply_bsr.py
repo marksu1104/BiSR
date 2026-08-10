@@ -65,7 +65,10 @@ def apply_split(work_dir, rules_file, split, top_k, threads, java, jar, xmx):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--datasets", nargs="+", default=DATASETS)
-    ap.add_argument("--work-root", default=str(SCRIPT_DIR / "work"))
+    ap.add_argument(
+        "--work-root",
+        default=str(REPO_ROOT / "outputs" / "preprocessed" / "anyburl"),
+    )
     ap.add_argument("--splits", nargs="+", default=["valid", "test"], choices=["valid", "test"])
     ap.add_argument("--learn-time", type=int, default=100, help="rules-<learn_time> to reuse")
     ap.add_argument("--top-k", type=int, default=200)

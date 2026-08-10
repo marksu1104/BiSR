@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-data_dir="data/NELL23K"
+data_dir="${SPARSEKGC_DACKGR_DATA_ROOT:-data}/NELL23K"
 model="conve"
 
 add_reversed_training_edges="True"

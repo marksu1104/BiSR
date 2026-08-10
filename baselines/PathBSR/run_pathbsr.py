@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parent
 REPO_ROOT = ROOT.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-DEFAULT_DATA_ROOT = REPO_ROOT / "datasets"
+DEFAULT_DATA_ROOT = Path(os.environ.get("SPARSEKGC_DATA_DIR") or (REPO_ROOT / "datasets"))
 DEFAULT_OUTPUT_DIR = Path(os.environ.get("SPARSEKGC_OUTPUT_DIR") or (REPO_ROOT / "outputs"))
 
 MAIN_FIELDS = ["Model", "Dataset", "MRR_Avg", "Hits@3_Avg", "MRR_Avg_Val", "Hits@3_Avg_Val", "seconds"]
@@ -49,10 +49,12 @@ def parse_args() -> argparse.Namespace:
 
 def run_split(datasets: list[str], split: str, data_root: Path, dry_run: bool) -> list[dict]:
     """Run PathBSR CLI for all datasets on one split, return parsed rows."""
-    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
-        out_path = Path(f.name)
-
     cli = ROOT / "scripts" / "run_pathbsr.py"
+    if dry_run:
+        out_path = Path("<temporary-output.csv>")
+    else:
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            out_path = Path(f.name)
     cmd = [sys.executable, str(cli)]
     for ds in datasets:
         cmd += ["--dataset", ds]
@@ -70,16 +72,17 @@ def run_split(datasets: list[str], split: str, data_root: Path, dry_run: bool) -
     env["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
     print(f"[pathbsr] Running {split} split for {len(datasets)} dataset(s)...", flush=True)
     start = time.perf_counter()
-    subprocess.run(cmd, check=True, env=env)
-    elapsed = time.perf_counter() - start
-    print(f"[pathbsr] {split} split done in {elapsed:.1f}s", flush=True)
+    try:
+        subprocess.run(cmd, check=True, env=env)
+        elapsed = time.perf_counter() - start
+        print(f"[pathbsr] {split} split done in {elapsed:.1f}s", flush=True)
 
-    rows = []
-    if out_path.exists():
-        with out_path.open() as f:
-            rows = list(csv.DictReader(f))
-        out_path.unlink()
-    return rows
+        if not out_path.exists():
+            return []
+        with out_path.open(encoding="utf-8", newline="") as f:
+            return list(csv.DictReader(f))
+    finally:
+        out_path.unlink(missing_ok=True)
 
 
 def write_csv(path: Path, fieldnames: list[str], rows: list[dict]) -> None:

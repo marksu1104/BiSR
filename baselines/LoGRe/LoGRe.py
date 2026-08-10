@@ -1,3 +1,7 @@
+# Modified by SparseKGC contributors in 2026.
+# Changes add portable CPU execution, deterministic metric exports, and
+# project-controlled output paths. See ../../THIRD_PARTY.md.
+
 import argparse
 import numpy as np
 import os

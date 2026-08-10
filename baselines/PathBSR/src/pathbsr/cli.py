@@ -10,9 +10,12 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
+from .locations import data_root
+
+
 def find_repo_root() -> Path:
     for candidate in Path(__file__).resolve().parents:
-        if (candidate / "pyproject.toml").is_file() and (candidate / "datasets").is_dir():
+        if (candidate / "pyproject.toml").is_file() and (candidate / "src" / "pathbsr").is_dir():
             return candidate
     raise FileNotFoundError("Could not locate the PathBSR repository root")
 
@@ -29,7 +32,7 @@ def log(message: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="python -m pathbsr.cli", description="Evaluate PathBSR.")
-    parser.add_argument("--data-root", type=Path, default=Path("datasets"))
+    parser.add_argument("--data-root", type=Path, default=data_root())
     parser.add_argument("--dataset", action="append", required=True)
     parser.add_argument("--split", choices=["valid", "test"], default="test")
     parser.add_argument("--max-examples", type=int, default=None)

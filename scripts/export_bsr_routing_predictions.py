@@ -35,7 +35,7 @@ import torch
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
-TRADITIONAL_DIR = REPO_ROOT / "baselines" / "tranditional"
+TRADITIONAL_DIR = REPO_ROOT / "baselines" / "traditional"
 HOGRN_DIR = REPO_ROOT / "baselines" / "HoGRN"
 
 TRAD_MODELS = {"TransE", "ConvE", "TuckER"}
@@ -81,7 +81,7 @@ def parse_args():
     parser.add_argument("--data-root", type=str, default=str(REPO_ROOT / "datasets"))
     parser.add_argument("--checkpoint-root", type=str, default=None,
                         help="Optional root containing per-baseline checkpoint subdirectories "
-                             "('tranditional', 'HoGRN'). Falls back to each baseline's own "
+                             "('traditional', 'HoGRN'). Falls back to each baseline's own "
                              "checkpoints/ directory when not given or when not found here.")
     parser.add_argument("--output-root", type=str, required=True)
     parser.add_argument("--models", nargs="+", default=["HoGRN", "TransE", "ConvE", "TuckER"],
@@ -160,7 +160,7 @@ def resolve_checkpoint(model_name, dataset_name, checkpoint_root):
     """Returns (checkpoint_path, score_func) or (None, None) if not found."""
     if model_name in TRAD_MODELS:
         filename = f"best_model_{model_name}_{dataset_name}.pth"
-        for d in _candidate_dirs("tranditional", TRADITIONAL_DIR / "checkpoints", checkpoint_root):
+        for d in _candidate_dirs("traditional", TRADITIONAL_DIR / "checkpoints", checkpoint_root):
             p = d / filename
             if p.exists():
                 return p, None
@@ -240,7 +240,7 @@ def _load_hogrn_run_module():
 # ---------------------------------------------------------------------------
 
 class TraditionalAdapter:
-    """TransE / ConvE / TuckER from baselines/tranditional.
+    """TransE / ConvE / TuckER from baselines/traditional.
 
     KGData builds ent2id/rel2id the exact same way as the BSR-compatible
     mapping (sorted entities, sorted base relations + reverse offset), so the
@@ -248,7 +248,7 @@ class TraditionalAdapter:
     translation needed.
     """
 
-    TRANSE_MARGIN = 9.0  # matches baselines/tranditional/run_all.py training config
+    TRANSE_MARGIN = 9.0  # matches baselines/traditional/run_all.py training config
 
     def __init__(self, model_name, checkpoint_path, num_entities, num_base_rel, device):
         models_module = _load_traditional_model_classes()

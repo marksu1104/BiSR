@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-data_dir="data/FB15K-237-10"
+data_dir="${SPARSEKGC_DACKGR_DATA_ROOT:-data}/FB15K-237-10"
 model="TransE"
 
 add_reversed_training_edges="True"

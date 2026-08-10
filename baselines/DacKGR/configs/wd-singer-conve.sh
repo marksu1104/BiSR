@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-data_dir="data/WD-singer"
+data_dir="${SPARSEKGC_DACKGR_DATA_ROOT:-data}/WD-singer"
 model="conve"
 
 add_reversed_training_edges="True"

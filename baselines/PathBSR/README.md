@@ -27,31 +27,45 @@ relation-path statistics are estimated offline from the training KG.
 9. **Evaluation** is bidirectional, filtered, full-entity, and average-tie.
 
 The defaults in this repository define the current PathBSR configuration.
-Generated experiment outputs are written under `results/`, which is intentionally
-ignored by Git and should be regenerated on each machine.
+PathBSR working artifacts are written under this directory's ignored `results/`
+folder. Final numerical records selected for the thesis are copied to the parent
+repository's tracked `results/metrics/` folder and are never inferred from a
+figure or thesis PDF.
 
 ## Reproduce on a new machine
 
+From the SparseKGC repository root, prepare the shared datasets and environment:
+
 ```bash
-cd PathBSR
-python3 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m pip install -e .
-PYTHONPATH=src .venv/bin/python -m pytest -q
+python scripts/prepare_datasets.py
+./setup_env.sh experiments
+source ".venv-$(uname -m)/bin/activate"
+PYTHONPATH=baselines/PathBSR/src \
+  python -m unittest discover -s baselines/PathBSR/tests -p 'test_*.py'
 ```
 
 If the system Python is externally managed, always call `.venv/bin/python`
 directly instead of relying on `python3` after activation.
 
-Dataset files are not versioned in this repository. Place the required
-train/valid/test splits under `datasets/<DatasetName>/` before running model or
-analysis scripts.
+The vendored layout reads datasets from the parent repository's
+`datasets/<DatasetName>/` folder. Set `SPARSEKGC_DATA_DIR` to use a different
+shared dataset root. A standalone PathBSR checkout falls back to its local
+`datasets/` folder.
 
 ## Run PathBSR
 
+From the SparseKGC repository root, use the platform-neutral runner:
+
 ```bash
-PYTHONPATH=src .venv/bin/python scripts/run_pathbsr.py \
+python run_baseline.py pathbsr --datasets NELL23K --dry_run
+python run_baseline.py pathbsr --datasets NELL23K
+```
+
+For a direct PathBSR invocation:
+
+```bash
+cd baselines/PathBSR
+PYTHONPATH=src python scripts/run_pathbsr.py \
   --dataset NELL23K \
   --split valid \
   --output results/runs/example_valid.csv
@@ -65,7 +79,7 @@ experimental flags. The same entry point is also available as
 To reproduce the current default test table:
 
 ```bash
-PYTHONPATH=src .venv/bin/python scripts/run_pathbsr.py \
+PYTHONPATH=src python scripts/run_pathbsr.py \
   --dataset FB15K-237-10 \
   --dataset FB15K-237-20 \
   --dataset FB15K-237-50 \
@@ -79,18 +93,20 @@ To regenerate thesis-facing validation ablations, structural analyses, and case
 studies from the current codebase, run:
 
 ```bash
-PYTHONPATH=src .venv/bin/python scripts/structural_analysis.py
-PYTHONPATH=src .venv/bin/python scripts/router_analysis.py
-PYTHONPATH=src .venv/bin/python scripts/pathbsr_experiments.py
+PYTHONPATH=src python scripts/structural_analysis.py
+PYTHONPATH=src python scripts/router_analysis.py
+PYTHONPATH=src python scripts/pathbsr_experiments.py
 ```
 
 Use `--skip-expensive` only when you want to refresh tables from already
 computed `results/ablation/pathbsr_validation_ablation_metrics.csv` rows.
 
-`results/` is intentionally ignored by Git and should be regenerated on each
-machine. `external_predictions/` is also ignored because it can be very large;
-copy it separately only when reproducing structural figures that include
-external baseline prediction exports such as AnyBURL, TransE, ConvE, or HoGRN.
+This directory's `results/` folder is ignored working space. Project-owned final
+tables and figures live in the parent repository's tracked `results/` folder and
+are generated through `scripts/generate_outputs.py`. The parent repository's
+`external_predictions/` folder is also ignored because it can be very large;
+copy it separately only when rebuilding analyses that consume prediction
+exports from AnyBURL, TransE, ConvE, or HoGRN.
 
 ## Repository layout
 
@@ -98,8 +114,8 @@ external baseline prediction exports such as AnyBURL, TransE, ConvE, or HoGRN.
 src/pathbsr/            model implementation
 scripts/                PathBSR runner and thesis-facing experiment builders
 tests/                  focused correctness tests
-datasets/               local train/valid/test splits, not versioned
-results/                runnable outputs, thesis-ready tables/figures, and cache
+../../datasets/         shared, versioned train/valid/test splits
+results/                local working outputs and caches, ignored by Git
 ```
 
 ## Status

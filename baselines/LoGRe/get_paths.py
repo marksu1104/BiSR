@@ -1,3 +1,7 @@
+# Modified by SparseKGC contributors in 2026.
+# Changes remove the optional Weights & Biases runtime dependency.
+# See ../../THIRD_PARTY.md.
+
 from tqdm import tqdm
 from collections import defaultdict
 import os

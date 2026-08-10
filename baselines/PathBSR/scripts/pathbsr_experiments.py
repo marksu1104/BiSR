@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from pathbsr import DEFAULT_CONFIG, PathBSR, load_dataset  # noqa: E402
 import pathbsr.model as pathbsr_model_module  # noqa: E402
 import pathbsr.paths as pathbsr_paths_module  # noqa: E402
+from pathbsr.locations import data_root, workspace_root  # noqa: E402
 from pathbsr.retrieval import build_proxy_index  # noqa: E402
 from pathbsr.exp import (  # noqa: E402
     DATASETS,
@@ -69,6 +70,7 @@ PATHBSR_VALID_DETAIL = RUNS / "pathbsr_valid_detail.csv"
 STRUCTURAL_FEATURES = RESULTS / "cache" / "structural_valid_features.csv"
 STRUCTURAL_LONG = RESULTS / "cache" / "structural_valid_long.csv"
 OBSOLETE_RUN_VARIANTS = {"proxy_jaccard", "proxy_tfidf_cosine"}
+DATA_ROOT = data_root()
 
 ABLATION_DATASETS = DATASETS
 RUN_VARIANTS: dict[str, dict[str, Any]] = {
@@ -278,7 +280,7 @@ def run_missing_validation_ablations(force: bool = False) -> None:
             print(f"[pathbsr-experiments] skip {dataset}: validation runs already exist", flush=True)
             continue
 
-        train, valid, test = load_dataset(ROOT / "datasets", dataset)
+        train, valid, test = load_dataset(DATA_ROOT, dataset)
         shared_model: PathBSR | None = None
         shared_build_sec = 0.0
         shared_indexes: dict[str, Any] = {}
@@ -341,7 +343,7 @@ def ensure_pathbsr_valid_detail(force: bool = False) -> None:
     rows: list[dict[str, Any]] = []
     for dataset in ("NELL23K", "WD-singer"):
         print(f"[pathbsr-experiments] generate PathBSR valid detail for {dataset}", flush=True)
-        train, valid, test = load_dataset(ROOT / "datasets", dataset)
+        train, valid, test = load_dataset(DATA_ROOT, dataset)
         model = PathBSR(train, valid, test, config=DEFAULT_CONFIG)
         total_queries = 2 * len(valid)
         completed = 0
@@ -666,7 +668,14 @@ def structural_inputs() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             add_rr(dataset, "PathBSR", feature, float(row["bsr_rr"]))
 
     for dataset in sorted(target_datasets):
-        anyburl_path = ROOT / "external_predictions" / "valid_predictions" / "AnyBURL" / dataset / "valid_query_summary.csv"
+        anyburl_path = (
+            workspace_root()
+            / "external_predictions"
+            / "valid_predictions"
+            / "AnyBURL"
+            / dataset
+            / "valid_query_summary.csv"
+        )
         if not anyburl_path.exists():
             continue
         for row in read_csv(anyburl_path):
@@ -788,8 +797,7 @@ def plot_cardinality(card_rows: list[dict[str, Any]]) -> None:
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, -0.08), ncol=len(labels), frameon=False)
     fig.tight_layout(rect=[0, 0.08, 1, 1])
-    for suffix in ("png", "pdf"):
-        fig.savefig(CARDINALITY_DIR / f"nell_wd_cardinality_mrr.{suffix}", dpi=160, bbox_inches="tight")
+    fig.savefig(CARDINALITY_DIR / "nell_wd_cardinality_mrr.png", dpi=160, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -891,8 +899,7 @@ def plot_few_path_focus(path_rows: list[dict[str, Any]]) -> None:
     ax.grid(True, axis="y", linestyle="--", linewidth=0.6, alpha=0.45)
     ax.legend(loc="lower center", bbox_to_anchor=(0.5, -0.35), ncol=len(available_models), frameon=False)
     fig.tight_layout(rect=[0, 0.12, 1, 1])
-    for suffix in ("png", "pdf"):
-        fig.savefig(PATH_COUNT_DIR / f"nell_wd_pathcount_mrr.{suffix}", dpi=180, bbox_inches="tight")
+    fig.savefig(PATH_COUNT_DIR / "nell_wd_pathcount_mrr.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -922,8 +929,7 @@ def plot_few_path_margin(summary_rows: list[dict[str, Any]]) -> None:
             fontsize=8,
         )
     fig.tight_layout()
-    for suffix in ("png", "pdf"):
-        fig.savefig(PATH_COUNT_DIR / f"nell_wd_few_path_margin.{suffix}", dpi=180, bbox_inches="tight")
+    fig.savefig(PATH_COUNT_DIR / "nell_wd_few_path_margin.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -1029,18 +1035,18 @@ Main outputs:
 - `ablation/core_components_mrr_validation.{csv,tex}`
 - `ablation/pathbsr_validation_ablation_metrics.csv`
 - `path_count/fb_pathbucket_query_share.{csv,tex}`
-- `path_count/fb_pathcount_mrr_grouped_bar.{png,pdf}`
+- `path_count/fb_pathcount_mrr_grouped_bar.png`
 - `path_count/nell_wd_pathcount_inputs.csv`
-- `path_count/nell_wd_pathcount_mrr.{png,pdf}`
+- `path_count/nell_wd_pathcount_mrr.png`
 - `cardinality/fb_cardinality_query_share.{csv,tex}`
-- `cardinality/fb_cardinality_mrr_grouped_bar.{png,pdf}`
-- `cardinality/all_datasets_cardinality_mrr_by_model.{png,pdf}` from `scripts/router_analysis.py`
+- `cardinality/fb_cardinality_mrr_grouped_bar.png`
+- `cardinality/all_datasets_cardinality_mrr_by_model.png` from `scripts/router_analysis.py`
 - `cardinality/nell_wd_cardinality_inputs.csv`
-- `cardinality/nell_wd_cardinality_mrr.{png,pdf}`
-- `path_count/all_datasets_pathcount_mrr_by_model.{png,pdf}` from `scripts/router_analysis.py`
+- `cardinality/nell_wd_cardinality_mrr.png`
+- `path_count/all_datasets_pathcount_mrr_by_model.png` from `scripts/router_analysis.py`
 - `case_studies/case_studies.md`
 - `evaluation_protocol/pathbsr_protocol_score_tables.csv`
-- `router/per_relation_router_test_summary.{csv,png,pdf}` from `scripts/router_analysis.py`
+- `router/per_relation_router_test_summary.{csv,png}` from `scripts/router_analysis.py`
 
 Interpretation cautions:
 

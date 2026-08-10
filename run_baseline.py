@@ -9,14 +9,13 @@ from pathlib import Path
 from datetime import datetime
 
 
-DATASETS = [
+PAPER_DATASETS = [
     "WD-singer",
     "FB15K-237-10",
     "WN18RR",
     "FB15K-237-20",
     "FB15K-237-50",
     "NELL23K",
-    "FB15K-237",
 ]
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -25,6 +24,10 @@ DATA_ROOT = BASE_DIR / "datasets"
 # Output root is env-overridable so concurrent jobs can write to isolated dirs
 # (avoids races on the shared *_metrics.csv); defaults to the repo outputs/.
 OUTPUT_DIR = Path(os.environ.get("SPARSEKGC_OUTPUT_DIR") or (BASE_DIR / "outputs"))
+PREPROCESSED_ROOT = Path(
+    os.environ.get("SPARSEKGC_PREPROCESSED_DIR")
+    or (BASE_DIR / "outputs" / "preprocessed")
+)
 
 BASELINE_METRICS = {
     "traditional": OUTPUT_DIR / "traditional_metrics.csv",
@@ -93,6 +96,7 @@ def run_command(cmd, cwd, dry_run=False, log_file=None, summary_context=None, en
     env = os.environ.copy()
     env["SPARSEKGC_OUTPUT_DIR"] = str(OUTPUT_DIR)
     env.setdefault("SPARSEKGC_DATA_DIR", str(DATA_ROOT))
+    env.setdefault("SPARSEKGC_PREPROCESSED_DIR", str(PREPROCESSED_ROOT))
     if env_overrides:
         env.update(env_overrides)
     if log_file is None:
@@ -154,7 +158,9 @@ def run_command(cmd, cwd, dry_run=False, log_file=None, summary_context=None, en
         print("-" * 72, flush=True)
 
 
-def reset_metrics(baseline):
+def reset_metrics(baseline, dry_run=False):
+    if dry_run:
+        return
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     path = BASELINE_METRICS[baseline]
     if path.exists():
@@ -176,7 +182,7 @@ def run_traditional(args):
         cmd.extend(["--max_epochs", str(args.max_epochs)])
     if args.dry_run:
         cmd.append("--dry_run")
-    run_command(cmd, BASE_DIR / "baselines" / "tranditional")
+    run_command(cmd, BASE_DIR / "baselines" / "traditional")
 
 
 def run_hogrn(args):
@@ -197,6 +203,18 @@ def run_hogrn(args):
 
 def run_dackgr(args):
     cwd = BASE_DIR / "baselines" / "DacKGR"
+    data_root = PREPROCESSED_ROOT / "dackgr"
+    prepare_cmd = [
+        python_bin(),
+        "scripts/prepare_datasets.py",
+        "--baseline",
+        "dackgr",
+        "--output-root",
+        str(PREPROCESSED_ROOT),
+        "--datasets",
+        *args.datasets,
+    ]
+    run_command(prepare_cmd, BASE_DIR, dry_run=args.dry_run)
     all_stages = [
         ("process_data", "point", "./experiment.sh", DACKGR_PROCESS_CONFIGS, "--process_data", {"DACKGR_WRITE_METRICS": "0"}),
         ("pretrain_conve", "conve", "./experiment-emb.sh", DACKGR_CONVE_CONFIGS, "--train", {"DACKGR_WRITE_METRICS": "0"}),
@@ -232,7 +250,10 @@ def run_dackgr(args):
                     dry_run=args.dry_run,
                     log_file=log_file,
                     summary_context={"baseline": "DacKGR", "stage": stage, "model": model, "dataset": dataset},
-                    env_overrides=env_overrides,
+                    env_overrides={
+                        "SPARSEKGC_DACKGR_DATA_ROOT": str(data_root),
+                        **env_overrides,
+                    },
                     show_summary=(stage == "train_infer"),
                     heartbeat_label=f"baseline=DacKGR stage={stage} model={model} dataset={dataset}",
                 )
@@ -254,7 +275,7 @@ def run_dackgr(args):
 
 
 def run_probcbr(args):
-    data_root = args.probcbr_data_root or str((BASE_DIR / "baselines" / "Prob-CBR" / "prob-cbr-data").resolve())
+    data_root = args.probcbr_data_root or str((PREPROCESSED_ROOT / "probcbr").resolve())
     expt_root = args.probcbr_expt_root or str((OUTPUT_DIR / "probcbr").resolve())
     cmd = [
         python_bin(),
@@ -281,6 +302,8 @@ def run_anyburl(args):
         "run_anyburl.py",
         "--datasets", *args.datasets,
         "--threads", str(args.anyburl_threads),
+        "--data-root", str(DATA_ROOT),
+        "--work-root", str(PREPROCESSED_ROOT / "anyburl"),
     ]
     if hasattr(args, "anyburl_learn_time") and args.anyburl_learn_time:
         cmd += ["--learn-time", str(args.anyburl_learn_time)]
@@ -294,6 +317,8 @@ def run_struprokgr(args):
         python_bin(),
         "run_struprokgr.py",
         "--datasets", *args.datasets,
+        "--data-root", str(DATA_ROOT),
+        "--work-root", str(PREPROCESSED_ROOT / "struprokgr"),
     ]
     if hasattr(args, "struprokgr_max_programs") and args.struprokgr_max_programs:
         cmd += ["--max-num-programs", str(args.struprokgr_max_programs)]
@@ -307,6 +332,8 @@ def run_logre(args):
         python_bin(),
         "run_logre.py",
         "--datasets", *args.datasets,
+        "--data-root", str(DATA_ROOT),
+        "--work-root", str(PREPROCESSED_ROOT / "logre"),
     ]
     if args.dry_run:
         cmd.append("--dry_run")
@@ -327,7 +354,12 @@ def run_pathbsr(args):
 def main():
     parser = argparse.ArgumentParser(description="Run one SparseKGC baseline with a unified entry point.")
     parser.add_argument("baseline", choices=["traditional", "hogrn", "dackgr", "probcbr", "anyburl", "struprokgr", "logre", "pathbsr"])
-    parser.add_argument("--datasets", nargs="+", default=DATASETS)
+    parser.add_argument(
+        "--datasets",
+        nargs="+",
+        default=PAPER_DATASETS,
+        help="Datasets to run (default: the six datasets reported in the thesis)",
+    )
     parser.add_argument("--gpu", default="0")
     parser.add_argument("--dry_run", action="store_true")
     parser.add_argument("--reset_metrics", action="store_true")
@@ -349,12 +381,14 @@ def main():
                         help="StruProKGR-only: max_num_programs (default: 100).")
     args = parser.parse_args()
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    if not args.dry_run:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     os.environ["SPARSEKGC_OUTPUT_DIR"] = str(OUTPUT_DIR)
     os.environ.setdefault("SPARSEKGC_DATA_DIR", str(DATA_ROOT))
+    os.environ.setdefault("SPARSEKGC_PREPROCESSED_DIR", str(PREPROCESSED_ROOT))
 
     if args.reset_metrics:
-        reset_metrics(args.baseline)
+        reset_metrics(args.baseline, dry_run=args.dry_run)
 
     if args.baseline == "traditional":
         run_traditional(args)

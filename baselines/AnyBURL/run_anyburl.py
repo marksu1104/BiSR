@@ -11,6 +11,7 @@ not abort the rest, matching the other one-shot SparseKGC runners.
 import argparse
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -31,7 +32,8 @@ DATASETS = ["WD-singer", "FB15K-237-10", "WN18RR",
             "FB15K-237-20", "FB15K-237-50", "NELL23K"]
 
 _JDK_ARCH = "aarch64" if platform.machine() == "aarch64" else "x86"
-DEFAULT_JAVA = str(REPO_ROOT / "tools" / f"jdk-21.0.11+10-{_JDK_ARCH}" / "bin" / "java")
+_BUNDLED_JAVA = REPO_ROOT / "tools" / f"jdk-21.0.11+10-{_JDK_ARCH}" / "bin" / "java"
+DEFAULT_JAVA = str(_BUNDLED_JAVA) if _BUNDLED_JAVA.exists() else (shutil.which("java") or "java")
 DEFAULT_JAR = str(SCRIPT_DIR / "AnyBURL-23-1x.jar")
 
 
@@ -154,7 +156,10 @@ def main():
     parser = argparse.ArgumentParser(description="Run AnyBURL baseline over SparseKGC datasets")
     parser.add_argument("--datasets", nargs="+", default=DATASETS)
     parser.add_argument("--data-root", default=str(REPO_ROOT / "datasets"))
-    parser.add_argument("--work-root", default=str(SCRIPT_DIR / "work"))
+    parser.add_argument(
+        "--work-root",
+        default=str(REPO_ROOT / "outputs" / "preprocessed" / "anyburl"),
+    )
     parser.add_argument("--java", default=os.environ.get("ANYBURL_JAVA", DEFAULT_JAVA))
     parser.add_argument("--jar", default=os.environ.get("ANYBURL_JAR", DEFAULT_JAR))
     parser.add_argument("--learn-time", type=int, default=100, help="AnyBURL SNAPSHOTS_AT seconds")
@@ -162,7 +167,18 @@ def main():
     parser.add_argument("--threads", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--xmx", default="12G")
+    parser.add_argument("--dry-run", "--dry_run", dest="dry_run", action="store_true")
     args = parser.parse_args()
+
+    if args.dry_run:
+        for dataset in args.datasets:
+            print(
+                "[dry_run] "
+                f"dataset={dataset} data={Path(args.data_root) / dataset} "
+                f"work={Path(args.work_root) / dataset} java={args.java} jar={args.jar}",
+                flush=True,
+            )
+        return
 
     failed = []
     for dataset in args.datasets:

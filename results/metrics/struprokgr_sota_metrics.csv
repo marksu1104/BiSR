@@ -1,0 +1,6 @@
+Dataset,Model,MRR_Tail,MRR_Head,MRR_Avg,Hits@1_Tail,Hits@1_Head,Hits@1_Avg,Hits@3_Tail,Hits@3_Head,Hits@3_Avg,Hits@10_Tail,Hits@10_Head,Hits@10_Avg,seconds
+WD-singer,StruProKGR,0.46525,—,—,0.40763,—,—,0.50023,—,—,0.56151,—,—,—
+FB15K-237-10,StruProKGR,0.23467,—,—,0.16716,—,—,0.25273,—,—,0.37289,—,—,—
+FB15K-237-20,StruProKGR,0.26727,—,—,0.19013,—,—,0.28868,—,—,0.42102,—,—,—
+FB15K-237-50,StruProKGR,0.30438,—,—,0.21935,—,—,0.33355,—,—,0.47633,—,—,—
+NELL23K,StruProKGR,0.26263,—,—,0.18599,—,—,0.28534,—,—,0.42750,—,—,—

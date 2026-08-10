@@ -32,6 +32,7 @@ DEFAULT_ARGS = {
 }
 
 BASE_DIR = Path(__file__).resolve().parent
+REPO_ROOT = BASE_DIR.parent.parent
 PYTHON_EXEC = sys.executable
 
 
@@ -175,7 +176,10 @@ def run_with_tee(cmd, log_file, dataset, dry_run=False, params_str=""):
 def main():
     parser = argparse.ArgumentParser(description="Run Prob-CBR on SparseKGC datasets")
     parser.add_argument("--datasets", nargs="+", default=DATASETS)
-    parser.add_argument("--data_root", default="prob-cbr-data")
+    parser.add_argument(
+        "--data_root",
+        default=str(REPO_ROOT / "outputs" / "preprocessed" / "probcbr"),
+    )
     # If caller did not provide --expt_root, prefer SPARSEKGC_OUTPUT_DIR/probcbr when available
     parser.add_argument("--expt_root", default=None)
     parser.add_argument("--num_paths_to_collect", type=int, default=DEFAULT_ARGS["num_paths_to_collect"])

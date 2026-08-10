@@ -10,7 +10,7 @@ AnyBURL `Apply` writes, per test triple, three lines:
     Heads: e1 <TAB> s1 <TAB> e2 <TAB> s2 ...     (candidates for (?, r, t))
     Tails: e1 <TAB> s1 <TAB> e2 <TAB> s2 ...     (candidates for (h, r, ?))
 
-Ranking (matching baselines/tranditional/main.py):
+Ranking (matching baselines/traditional/main.py):
   - Filtered: other known-true entities (from train+valid+test) are removed.
   - Tie-aware: rank = #{score > target} + (#{score == target} + 1) / 2,
     computed over all N non-masked entities.

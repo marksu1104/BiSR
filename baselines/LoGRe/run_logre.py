@@ -79,10 +79,11 @@ def metrics_csv_path(suffix=""):
     return base / f"logre{suffix}_metrics.csv"
 
 
-def baseline_log_dir():
+def baseline_log_dir(create=True):
     root = os.environ.get("SPARSEKGC_OUTPUT_DIR")
     d = (Path(root) / "logre") if root else (REPO_ROOT / "outputs" / "logre")
-    d.mkdir(parents=True, exist_ok=True)
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
@@ -139,14 +140,17 @@ def parse_sota(line):
 def run_one(dataset: str, args):
     data_root = Path(args.data_root)
     work_root = Path(args.work_root)
-    out_dir   = baseline_log_dir() / dataset
-    out_dir.mkdir(parents=True, exist_ok=True)
+    dry_run = bool(getattr(args, "dry_run", False))
+    log_root = baseline_log_dir(create=not dry_run)
+    out_dir = log_root / dataset
+    if not dry_run:
+        out_dir.mkdir(parents=True, exist_ok=True)
 
     # 0. Apply paper's per-dataset hyperparameters
     apply_per_dataset(dataset, args)
 
     # 1. Prepare data
-    work_dir = prepare(data_root, work_root, dataset)
+    work_dir = work_root / dataset if dry_run else prepare(data_root, work_root, dataset)
 
     params = (
         f"max_programs={args.max_num_programs} num_paths={args.num_paths_to_collect} "
@@ -154,21 +158,23 @@ def run_one(dataset: str, args):
     )
     print_start(timestamp(), "logre", "LoGRe", dataset, params)
 
-    log_file = baseline_log_dir() / f"LoGRe_{dataset}.log"
+    log_file = log_root / f"LoGRe_{dataset}.log"
+    fwd_dump = out_dir / "dump_forward.tsv"
+    inv_dump = out_dir / "dump_inverse.tsv"
+    if dry_run:
+        run_logre_once(work_dir, dataset, "test.triples", fwd_dump, out_dir, None, args)
+        run_logre_once(work_dir, dataset, "test_inv.triples", inv_dump, out_dir, None, args)
+        return
+
     start = time.perf_counter()
     with log_file.open("w", buffering=1) as log_fh:
         # 2. Forward run (tail queries: test.triples)
-        fwd_dump = out_dir / "dump_forward.tsv"
         sota_line = run_logre_once(work_dir, dataset, "test.triples", fwd_dump, out_dir, log_fh, args)
 
         # 3. Inverse run (head queries: test_inv.triples)
-        inv_dump = out_dir / "dump_inverse.tsv"
         run_logre_once(work_dir, dataset, "test_inv.triples", inv_dump, out_dir, log_fh, args)
 
     seconds = time.perf_counter() - start
-
-    if getattr(args, "dry_run", False):
-        return
 
     # 4. Score under main protocol (bidirectional + tie-aware)
     res = evaluate(fwd_dump, inv_dump, data_root, dataset)
@@ -216,7 +222,10 @@ def main():
     parser = argparse.ArgumentParser(description="Run LoGRe baseline over SparseKGC datasets")
     parser.add_argument("--datasets", nargs="+", default=SUPPORTED_DATASETS)
     parser.add_argument("--data-root",  default=str(REPO_ROOT / "datasets"))
-    parser.add_argument("--work-root",  default=str(SCRIPT_DIR / "work"))
+    parser.add_argument(
+        "--work-root",
+        default=str(REPO_ROOT / "outputs" / "preprocessed" / "logre"),
+    )
     parser.add_argument("--max-num-programs",    type=int, default=LOGRE_DEFAULTS["max_num_programs"],
                         dest="max_num_programs")
     parser.add_argument("--num-paths-to-collect", type=int, default=LOGRE_DEFAULTS["num_paths_to_collect"],

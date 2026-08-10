@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-data_dir="data/FB15K-237-20"
+data_dir="${SPARSEKGC_DACKGR_DATA_ROOT:-data}/FB15K-237-20"
 model="point.rs.conve"
 group_examples_by_query="True"
 use_action_space_bucketing="True"

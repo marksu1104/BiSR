@@ -1,7 +1,8 @@
 import argparse
-import shutil
 from pathlib import Path
-from prob_cbr.data.data_utils import get_inv_relation
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent.parent
 
 DATASETS = [
     "WD-singer",
@@ -12,6 +13,15 @@ DATASETS = [
     "NELL23K",
     "FB15K-237",
 ]
+
+
+def get_inv_relation(relation: str, dataset: str) -> str:
+    """Return the inverse-relation spelling used by the upstream evaluator."""
+    if dataset == "nell":
+        return relation[:-4] if relation.endswith("_inv") else relation + "_inv"
+    if relation.startswith("__") or relation.startswith("_/"):
+        return relation[1:]
+    return "_" + relation
 
 
 def convert_file(src, dst):
@@ -57,9 +67,12 @@ def prepare_dataset(source_root, output_root, dataset):
 
 def main():
     parser = argparse.ArgumentParser(description="Prepare SparseKGC datasets for Prob-CBR")
-    parser.add_argument("--source_root", default="../../datasets")
-    parser.add_argument("--output_root", default="prob-cbr-data")
-    parser.add_argument("--datasets", nargs="+", default=DATASETS)
+    parser.add_argument("--source_root", default=str(REPO_ROOT / "datasets"))
+    parser.add_argument(
+        "--output_root",
+        default=str(REPO_ROOT / "outputs" / "preprocessed" / "probcbr"),
+    )
+    parser.add_argument("--datasets", nargs="+", choices=DATASETS, required=True)
     args = parser.parse_args()
 
     source_root = Path(args.source_root).resolve()

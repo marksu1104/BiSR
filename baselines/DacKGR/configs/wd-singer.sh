@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-data_dir="data/WD-singer"
+data_dir="${SPARSEKGC_DACKGR_DATA_ROOT:-data}/WD-singer"
 model="point"
 group_examples_by_query="False"
 use_action_space_bucketing="True"

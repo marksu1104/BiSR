@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-data_dir="data/WN18RR"
+data_dir="${SPARSEKGC_DACKGR_DATA_ROOT:-data}/WN18RR"
 model="conve"
 
 add_reversed_training_edges="True"

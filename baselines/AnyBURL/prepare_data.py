@@ -14,7 +14,6 @@ filtered bidirectional protocol used by the other SparseKGC baselines.
 Output: <out_root>/<dataset>/{train,valid,test}.txt
 """
 import argparse
-import os
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -41,8 +40,12 @@ def convert_file(src: Path, dst: Path):
 def main():
     parser = argparse.ArgumentParser(description="Convert SparseKGC datasets to AnyBURL format")
     parser.add_argument("--data-root", type=str, default=str(REPO_ROOT / "datasets"))
-    parser.add_argument("--out-root", type=str, default=str(SCRIPT_DIR / "work"))
-    parser.add_argument("--datasets", nargs="+", default=DATASETS)
+    parser.add_argument(
+        "--out-root",
+        type=str,
+        default=str(REPO_ROOT / "outputs" / "preprocessed" / "anyburl"),
+    )
+    parser.add_argument("--datasets", nargs="+", choices=DATASETS, required=True)
     args = parser.parse_args()
 
     data_root = Path(args.data_root)

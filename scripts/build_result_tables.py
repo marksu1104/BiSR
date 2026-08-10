@@ -2,9 +2,9 @@
 Generate Chapter 5 result tables for the PathBSR thesis.
 
 Usage:
-    python scripts/build_result_tables.py [--out exp_results]
+    python scripts/build_result_tables.py
 
-Outputs (all written to --out directory):
+Outputs (all written to results/tables by default):
     main_table.csv          MRR_Avg / Hits@3_Avg for all 6 datasets × 13 models
     sota_table.csv          MRR_Tail / Hits@3_Tail for all 6 datasets × 13 models
     efficiency_table.csv    Wall-clock runtime for 3 representative datasets
@@ -14,7 +14,6 @@ Outputs (all written to --out directory):
 
 import argparse
 import csv
-import os
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -22,7 +21,8 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-OUTPUTS   = REPO_ROOT / "outputs"
+DEFAULT_METRICS_DIR = REPO_ROOT / "results" / "metrics"
+DEFAULT_TABLE_DIR = REPO_ROOT / "results" / "tables"
 
 MODEL_ORDER = [
     "TransE", "DistMult", "ComplEx", "ConvE", "RotatE", "TuckER",
@@ -36,37 +36,41 @@ DATASETS = [
 ]
 
 # (csv_path, model_key_in_csv)
-MAIN_SRC = {
-    "TransE":     (OUTPUTS / "traditional_metrics.csv",        "TransE"),
-    "RotatE":     (OUTPUTS / "traditional_metrics.csv",        "RotatE"),
-    "DistMult":   (OUTPUTS / "traditional_metrics.csv",        "DistMult"),
-    "ComplEx":    (OUTPUTS / "traditional_metrics.csv",        "ComplEx"),
-    "ConvE":      (OUTPUTS / "traditional_metrics.csv",        "ConvE"),
-    "TuckER":     (OUTPUTS / "traditional_metrics.csv",        "TuckER"),
-    "Prob-CBR":   (OUTPUTS / "probcbr_metrics.csv",            "Prob-CBR"),
-    "AnyBURL":    (OUTPUTS / "anyburl_metrics.csv",            "AnyBURL"),
-    "DacKGR":     (OUTPUTS / "dackgr_metrics.csv",             "point.rs.conve"),
-    "HoGRN":      (OUTPUTS / "hogrn_metrics.csv",              "conve"),
-    "LoGRe":      (OUTPUTS / "logre_metrics.csv",              "LoGRe"),
-    "StruProKGR": (OUTPUTS / "struprokgr_metrics.csv",         "StruProKGR"),
-    "PathBSR":    (OUTPUTS / "pathbsr_metrics.csv",            "PathBSR"),
-}
+def _source_maps(metrics_dir: Path):
+    main = {
+        "TransE":     (metrics_dir / "traditional_metrics.csv", "TransE"),
+        "RotatE":     (metrics_dir / "traditional_metrics.csv", "RotatE"),
+        "DistMult":   (metrics_dir / "traditional_metrics.csv", "DistMult"),
+        "ComplEx":    (metrics_dir / "traditional_metrics.csv", "ComplEx"),
+        "ConvE":      (metrics_dir / "traditional_metrics.csv", "ConvE"),
+        "TuckER":     (metrics_dir / "traditional_metrics.csv", "TuckER"),
+        "Prob-CBR":   (metrics_dir / "probcbr_metrics.csv", "Prob-CBR"),
+        "AnyBURL":    (metrics_dir / "anyburl_metrics.csv", "AnyBURL"),
+        "DacKGR":     (metrics_dir / "dackgr_metrics.csv", "point.rs.conve"),
+        "HoGRN":      (metrics_dir / "hogrn_metrics.csv", "conve"),
+        "LoGRe":      (metrics_dir / "logre_metrics.csv", "LoGRe"),
+        "StruProKGR": (metrics_dir / "struprokgr_metrics.csv", "StruProKGR"),
+        "PathBSR":    (metrics_dir / "pathbsr_metrics.csv", "PathBSR"),
+    }
+    sota = {
+        "TransE":     (metrics_dir / "traditional_sota_metrics.csv", "TransE"),
+        "RotatE":     (metrics_dir / "traditional_sota_metrics.csv", "RotatE"),
+        "DistMult":   (metrics_dir / "traditional_sota_metrics.csv", "DistMult"),
+        "ComplEx":    (metrics_dir / "traditional_sota_metrics.csv", "ComplEx"),
+        "ConvE":      (metrics_dir / "traditional_sota_metrics.csv", "ConvE"),
+        "TuckER":     (metrics_dir / "traditional_sota_metrics.csv", "TuckER"),
+        "Prob-CBR":   (metrics_dir / "probcbr_metrics.csv", "Prob-CBR"),
+        "AnyBURL":    (metrics_dir / "anyburl_metrics.csv", "AnyBURL"),
+        "DacKGR":     (metrics_dir / "dackgr_metrics.csv", "point.rs.conve"),
+        "HoGRN":      (metrics_dir / "hogrn_metrics.csv", "conve"),
+        "LoGRe":      (metrics_dir / "logre_sota_metrics.csv", "LoGRe"),
+        "StruProKGR": (metrics_dir / "struprokgr_sota_metrics.csv", "StruProKGR"),
+        "PathBSR":    (metrics_dir / "pathbsr_sota_metrics.csv", "PathBSR"),
+    }
+    return main, sota
 
-SOTA_SRC = {
-    "TransE":     (OUTPUTS / "traditional_sota_metrics.csv",   "TransE"),
-    "RotatE":     (OUTPUTS / "traditional_sota_metrics.csv",   "RotatE"),
-    "DistMult":   (OUTPUTS / "traditional_sota_metrics.csv",   "DistMult"),
-    "ComplEx":    (OUTPUTS / "traditional_sota_metrics.csv",   "ComplEx"),
-    "ConvE":      (OUTPUTS / "traditional_sota_metrics.csv",   "ConvE"),
-    "TuckER":     (OUTPUTS / "traditional_sota_metrics.csv",   "TuckER"),
-    "Prob-CBR":   (OUTPUTS / "probcbr_metrics.csv",            "Prob-CBR"),
-    "AnyBURL":    (OUTPUTS / "anyburl_metrics.csv",            "AnyBURL"),   # MRR_Tail in main csv
-    "DacKGR":     (OUTPUTS / "dackgr_metrics.csv",             "point.rs.conve"),
-    "HoGRN":      (OUTPUTS / "hogrn_metrics.csv",              "conve"),
-    "LoGRe":      (OUTPUTS / "logre_sota_metrics.csv",         "LoGRe"),
-    "StruProKGR": (OUTPUTS / "struprokgr_sota_metrics.csv",    "StruProKGR"),
-    "PathBSR":    (OUTPUTS / "pathbsr_sota_metrics.csv",       "PathBSR"),
-}
+
+MAIN_SRC, SOTA_SRC = _source_maps(DEFAULT_METRICS_DIR)
 
 
 # Efficiency table: only these three representative datasets
@@ -85,10 +89,9 @@ def _load(path: Path):
     key = str(path)
     if key not in _csv_cache:
         if not path.exists():
-            _csv_cache[key] = []
-        else:
-            with open(path) as f:
-                _csv_cache[key] = list(csv.DictReader(f))
+            raise FileNotFoundError(f"Required metrics file not found: {path}")
+        with path.open(encoding="utf-8", newline="") as f:
+            _csv_cache[key] = list(csv.DictReader(f))
     return _csv_cache[key]
 
 
@@ -152,7 +155,7 @@ def build_sota_table():
 
 def build_efficiency_table():
     rows = []
-    for m in MODEL_ORDER:
+    for m in EFF_METHODS:
         path, mkey = MAIN_SRC[m]
         row = {"Method": m}
         for ds in EFF_DATASETS:
@@ -169,7 +172,7 @@ def build_efficiency_table():
 
 def write_main_csv(rows, out: Path):
     cols = ["Method"] + [f"{ds}_{m}" for ds in DATASETS for m in ("MRR", "H3")]
-    with open(out, "w", newline="") as f:
+    with out.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader(); w.writerows(rows)
 
@@ -188,7 +191,7 @@ def write_efficiency_csv(rows, out: Path):
             nr[f"{ds}_time"]  = r[ds]
             nr[f"{ds}_raw_s"] = r[f"{ds}_raw_s"]
         renamed.append(nr)
-    with open(out, "w", newline="") as f:
+    with out.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader(); w.writerows(renamed)
 
@@ -258,6 +261,8 @@ def _md_mrr_table(rows, title, datasets=DATASETS):
             rank = col_ranks[ds].get(m)
             cells.append(_md_mark(cell, rank) if cell != "—" else cell)
         method_str = f"**{m}**" if m == "PathBSR" else m
+        if m == "DacKGR":
+            method_str += "‡"
         row_str = f"| {method_str} | " + " | ".join(cells) + " |"
         lines.append(row_str)
     return "\n".join(lines)
@@ -302,6 +307,7 @@ def write_markdown(main, sota, eff, out: Path):
         "Protocol — **Main**: bidirectional filtered full-entity ranking, average-tie (MRR_Avg / Hits@3_Avg).  "
         "**SOTA**: tail-only, optimistic tie-breaking (MRR_Tail / Hits@3_Tail).  "
         "WD† = WD-singer (official split, exact-triple overlap caveat).  "
+        "DacKGR‡ uses the preserved local WN18RR adaptation; its original paper did not report WN18RR.  "
         "LoGRe / StruProKGR do not support WN18RR.\n",
         "Top-3 per column (by MRR): **bold** (1st) / <u>underline</u> (2nd) / `code` (3rd).\n",
         _md_mrr_table(main, "Main Protocol (Bidirectional, Average-tie)"),
@@ -313,7 +319,7 @@ def write_markdown(main, sota, eff, out: Path):
         "> Efficiency note: times are wall-clock on aarch64 GH200 GPU nodes.  "
         "PathBSR = path-rule mining + valid/test inference (tqdm logs).",
     ]
-    out.write_text("\n".join(sections))
+    out.write_text("\n".join(sections) + "\n", encoding="utf-8", newline="\n")
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +366,8 @@ def _latex_mrr_table(rows, caption, label, datasets=DATASETS):
             else:
                 cells.append("—")
         m_tex = m.replace("-", r"\text{-}")
+        if m == "DacKGR":
+            m_tex += r"\textsuperscript{‡}"
         method_cell = r"\textbf{" + m_tex + "}" if m == "PathBSR" else m_tex
         lines.append(method_cell + " & " + " & ".join(cells) + r" \\")
 
@@ -413,50 +421,64 @@ def write_latex(main, sota, eff, out: Path):
         _latex_mrr_table(
             main,
             r"Main protocol results (MRR / Hits@3, bidirectional filtered, average-tie). "
-            r"WD\textsuperscript{†} = WD-singer. — = not supported.",
+            r"WD\textsuperscript{†} = WD-singer. DacKGR\textsuperscript{‡} uses the preserved local "
+            r"WN18RR adaptation; the original paper did not report WN18RR. — = not supported.",
             "tab:main",
         ),
         "",
         _latex_mrr_table(
             sota,
             r"SOTA-comparison results (MRR / Hits@3, tail-only, optimistic tie-breaking). "
-            r"WD\textsuperscript{†} = WD-singer.",
+            r"WD\textsuperscript{†} = WD-singer. DacKGR\textsuperscript{‡} uses the preserved local "
+            r"WN18RR adaptation; the original paper did not report WN18RR.",
             "tab:sota",
         ),
         "",
         _latex_eff_table(eff),
     ]
-    out.write_text("\n".join(parts))
+    out.write_text("\n".join(parts) + "\n", encoding="utf-8", newline="\n")
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--out", default="exp_results",
-                        help="Output directory (relative to repo root or absolute)")
-    args = parser.parse_args()
-
-    out = Path(args.out)
-    if not out.is_absolute():
-        out = REPO_ROOT / out
+def generate(metrics_dir: Path = DEFAULT_METRICS_DIR, out: Path = DEFAULT_TABLE_DIR) -> list[Path]:
+    global MAIN_SRC, SOTA_SRC
+    metrics_dir = Path(metrics_dir).resolve()
+    out = Path(out).resolve()
+    MAIN_SRC, SOTA_SRC = _source_maps(metrics_dir)
+    _csv_cache.clear()
     out.mkdir(parents=True, exist_ok=True)
 
     main_rows = build_main_table()
     sota_rows = build_sota_table()
-    eff_rows  = build_efficiency_table()
+    eff_rows = build_efficiency_table()
 
-    write_main_csv(main_rows, out / "main_table.csv")
-    write_sota_csv(sota_rows, out / "sota_table.csv")
-    write_efficiency_csv(eff_rows, out / "efficiency_table.csv")
-    write_markdown(main_rows, sota_rows, eff_rows, out / "tables.md")
-    write_latex(main_rows, sota_rows, eff_rows, out / "tables.tex")
+    generated = [
+        out / "main_table.csv",
+        out / "sota_table.csv",
+        out / "efficiency_table.csv",
+        out / "tables.md",
+        out / "tables.tex",
+    ]
+    write_main_csv(main_rows, generated[0])
+    write_sota_csv(sota_rows, generated[1])
+    write_efficiency_csv(eff_rows, generated[2])
+    write_markdown(main_rows, sota_rows, eff_rows, generated[3])
+    write_latex(main_rows, sota_rows, eff_rows, generated[4])
+    return generated
 
-    print(f"Written to {out}/")
-    for f in sorted(out.iterdir()):
-        print(f"  {f.name}")
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--metrics", type=Path, default=DEFAULT_METRICS_DIR,
+                        help="Directory containing the saved final metrics")
+    parser.add_argument("--out", type=Path, default=DEFAULT_TABLE_DIR,
+                        help="Directory for generated tables")
+    args = parser.parse_args()
+    generated = generate(args.metrics, args.out)
+    print(f"Generated {len(generated)} table files in {Path(args.out).resolve()}")
 
 
 if __name__ == "__main__":
