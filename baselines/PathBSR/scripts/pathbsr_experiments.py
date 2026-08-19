@@ -956,9 +956,7 @@ def write_cases() -> None:
 def write_evaluation_protocol_tables() -> None:
     """Export paper-facing protocol table from the completed final test run.
 
-    This mirrors `notebooks/pathbsr_evaluation_protocol_tables.ipynb` so the
-    cleaned script workflow can rebuild the protocol artifact without relying on
-    notebook state.
+    The script workflow rebuilds the artifact directly from saved run data.
     """
     if not FINAL_TEST_METRICS.exists():
         print(

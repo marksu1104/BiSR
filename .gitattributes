@@ -1,0 +1,10 @@
+# Keep GitHub language statistics focused on project-authored implementations.
+# These directories contain adapted snapshots of the cited upstream projects.
+baselines/DacKGR/** linguist-vendored=true
+baselines/HoGRN/** linguist-vendored=true
+baselines/LoGRe/** linguist-vendored=true
+baselines/Prob-CBR/** linguist-vendored=true
+baselines/StruProKGR/** linguist-vendored=true
+
+# These files are deterministic products of the project output generators.
+results/tables/** linguist-generated=true

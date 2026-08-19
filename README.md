@@ -8,22 +8,24 @@ the thesis experiments.
 The primary repository goal is to regenerate every reported table and figure
 from saved numerical results without rerunning expensive experiments.
 
-## Generate the Saved Outputs
+## Quick Start
 
-Python 3.12 is the canonical output-generation environment. On a standard Linux
-machine:
+Python 3.12 is the canonical output environment. On standard Linux:
 
 ```bash
 ./setup_env.sh outputs
 source ".venv-$(uname -m)/bin/activate"
 python scripts/generate_outputs.py --check
+python scripts/prepare_datasets.py --check
 ```
 
-`--check` rebuilds every registered table and figure in a temporary directory
-and compares it byte-for-byte with the committed outputs. It does not change
-files or run experiments.
+These checks validate all canonical datasets and rebuild every registered output
+in a temporary directory for byte comparison. They do not modify files or run
+experiments.
 
-To update the generated files from the saved metrics:
+## Saved Outputs
+
+Generate tables and figures from the saved metrics with:
 
 ```bash
 python scripts/generate_outputs.py
@@ -40,37 +42,13 @@ results/
 └── figures/    # Generated PNG figures
 ```
 
-Files in `results/tables/` and `results/figures/` must never be edited by hand.
-The generator rejects unregistered files in those directories.
-
-## Prepare the Datasets
-
-The seven canonical datasets are tracked only under `datasets/` in the shared
-`head`, `tail`, `relation` format. Validate them without writing files:
-
-```bash
-python scripts/prepare_datasets.py --check
-```
-
-Baselines that require different names, column orders, inverse edges, or caches
-create them under the ignored `outputs/preprocessed/` directory. DacKGR's
-working layout can also be prepared and verified directly:
-
-```bash
-python scripts/prepare_datasets.py --baseline dackgr --datasets WN18RR
-python scripts/prepare_datasets.py --baseline dackgr --datasets WN18RR --check
-```
-
-Prepared files are never treated as independent dataset sources. Existing
-prepared files are preserved when they differ; use `--force` only after
-inspecting the reported mismatch. Working data is generated only for datasets
-named in the command that is being run. It consists of ordinary files rather
-than links, is ignored by Git, and can be deleted and regenerated from
-`datasets/`.
+Do not edit generated tables or figures by hand. Dataset conversions and caches
+are created on demand under the ignored `outputs/preprocessed/` directory; the
+tracked `datasets/` directory is always the canonical source.
 
 ## Run Experiments Locally
 
-Experiment execution is optional and separate from output generation:
+Experiment execution is optional and separate from saved-output generation:
 
 ```bash
 ./setup_env.sh experiments
@@ -79,31 +57,23 @@ python run_baseline.py pathbsr --datasets NELL23K --dry_run
 python run_baseline.py pathbsr --datasets NELL23K
 ```
 
-Omit `--datasets` to run a baseline over the six datasets reported in the
-thesis. The full `FB15K-237` dataset is retained for structural analysis and
-can be requested explicitly when a baseline supports it:
-
-```bash
-python run_baseline.py hogrn --dry_run
-python run_baseline.py dackgr --datasets FB15K-237
-```
-
-The same entry point supports:
+The entry point supports:
 
 ```text
 traditional  hogrn  dackgr  probcbr  anyburl  struprokgr  logre  pathbsr
 ```
 
-Converted datasets, raw runs, logs, checkpoints, and temporary predictions are
-written under ignored working directories such as `outputs/`. Completed metrics
-selected for the thesis are saved separately under `results/metrics/`.
+Omit `--datasets` to use the six thesis datasets; request full `FB15K-237`
+explicitly when needed. Raw runs, logs, checkpoints, and temporary predictions
+remain under ignored working directories. Thesis metrics are saved separately
+under `results/metrics/`.
 
 PyTorch and CUDA wheels are platform dependent. `requirements.txt` records the
-experiment environment used by this project, but a CUDA build compatible with
-the local driver may need to be installed from the official PyTorch index.
-AnyBURL additionally requires Java and the external `AnyBURL-23-1x.jar`; set
-`ANYBURL_JAVA` and `ANYBURL_JAR` when they are not available at the default
-locations.
+direct experiment dependencies. `requirements-lock.txt` preserves the complete
+package snapshot used by the finished experiment environment and can be selected
+with `./setup_env.sh experiments-lock`. A CUDA build compatible with the local
+driver may need to be installed from the official PyTorch index.
+AnyBURL additionally requires Java; its BSD-licensed release JAR is included.
 
 ## Run with Slurm
 
@@ -114,10 +84,8 @@ sbatch scripts/slurm/exp_pathbsr.sh
 sbatch --export=ALL,DATASETS="WD-singer NELL23K" scripts/slurm/exp_hogrn.sh
 ```
 
-The wrappers contain no personal account, node, or repository path. Site-specific
-options should be supplied to `sbatch`, for example `--account`, `--partition`,
-or `--nodelist`. Set `SPARSEKGC_VENV` when the environment is not located at the
-default architecture-specific path.
+Supply site-specific options such as `--account` or `--partition` through
+`sbatch`. Set `SPARSEKGC_VENV` for a non-default environment path.
 
 ## Evaluation Protocols
 
@@ -126,41 +94,30 @@ default architecture-specific path.
 | Main | Bidirectional tail and inverse-head queries | Average rank for ties | Full-entity filtered |
 | SOTA comparison | Tail queries only | Optimistic first match | Full-entity filtered |
 
-The protocols are intentionally kept separate. A baseline result is never copied
-between protocols when its native evaluator uses different query or tie semantics.
+Results are not copied between protocols when native evaluation semantics differ.
 
 ## Repository Structure
 
 ```text
 SparseKGC/
-├── baselines/                 # Original and adapted baseline implementations
-├── datasets/                  # Tracked canonical splits and input metadata
-├── outputs/
-│   ├── preprocessed/          # Generated baseline-specific dataset formats
-│   └── ...                    # Raw runs, logs, caches, and checkpoints
-├── results/                   # Saved metrics and generated research outputs
-├── scripts/
-│   ├── generate_outputs.py    # Generate or verify every registered output
-│   ├── prepare_datasets.py    # Prepare and verify shared dataset splits
-│   └── slurm/                 # Optional cluster wrappers
-├── run_baseline.py            # Platform-neutral experiment entry point
-├── setup_env.sh               # Output or experiment environment setup
-├── REPRODUCIBILITY.md
-└── THIRD_PARTY.md
+├── baselines/       # PathBSR and adapted comparison methods
+├── datasets/        # Canonical splits and input metadata
+├── outputs/         # Ignored experiment working files
+├── results/         # Saved metrics and generated paper outputs
+├── scripts/         # Output, dataset, and Slurm utilities
+├── run_baseline.py  # Platform-neutral experiment entry point
+└── setup_env.sh     # Output or experiment environment setup
 ```
 
-See [REPRODUCIBILITY.md](REPRODUCIBILITY.md) for the thesis artifact map and
-[THIRD_PARTY.md](THIRD_PARTY.md) for upstream sources, citations, licenses, and
-known local modifications.
+## Documentation
 
-Project-authored code is MIT licensed. HoGRN and StruProKGR did not publish
-software licenses. Their vendored code is retained with exact provenance to
-make the experiments self-contained, but is explicitly excluded from the root
-MIT grant; see `THIRD_PARTY.md` for the revisions and status.
+- [REPRODUCIBILITY.md](REPRODUCIBILITY.md): output contract and thesis artifact map.
+- [THIRD_PARTY.md](THIRD_PARTY.md): upstream revisions, citations, licenses, and modifications.
+- [datasets/README.md](datasets/README.md): dataset format and compatibility notes.
 
-## Current Scope
+Main, SOTA, and efficiency results are integrated. Remaining structural,
+ablation, and case-study artifacts will be added with their numerical sources
+and generators. The thesis draft is not tracked.
 
-The saved main, SOTA, and efficiency results are integrated. Structural,
-ablation, and case-study artifacts generated on the separate PathBSR machine
-will be added only with their numerical source files and generating code. The
-thesis draft itself is intentionally excluded from Git.
+The root MIT license covers project-authored work only. See `THIRD_PARTY.md` for
+the status of vendored code and datasets.

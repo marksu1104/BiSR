@@ -1,0 +1,38 @@
+name: Verify reproducibility
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-outputs.txt
+
+      - name: Install output dependencies
+        run: python -m pip install -r requirements-outputs.txt
+
+      - name: Validate canonical datasets
+        run: python scripts/prepare_datasets.py --check
+
+      - name: Verify saved outputs
+        run: python scripts/generate_outputs.py --check
+
+      - name: Validate experiment commands
+        shell: bash
+        run: |
+          for baseline in traditional hogrn dackgr probcbr anyburl struprokgr logre pathbsr; do
+            python run_baseline.py "${baseline}" --datasets NELL23K --dry_run
+          done

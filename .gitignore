@@ -46,8 +46,9 @@ wandb/
 .venv-x86/
 .venv-*/
 
-# AnyBURL: downloaded JAR + generated data/rules/predictions (code is tracked)
+# AnyBURL: retain the small BSD-licensed release JAR; ignore generated work
 *.jar
+!baselines/AnyBURL/AnyBURL-23-1x.jar
 baselines/AnyBURL/work/
 
 # StruProKGR: generated work dir (prepared data, score dumps, cache pickles)

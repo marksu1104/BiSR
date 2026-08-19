@@ -14,8 +14,11 @@ case "${MODE}" in
   experiments)
     REQUIREMENTS="${REPO_ROOT}/requirements.txt"
     ;;
+  experiments-lock)
+    REQUIREMENTS="${REPO_ROOT}/requirements-lock.txt"
+    ;;
   *)
-    echo "Usage: ./setup_env.sh [outputs|experiments]" >&2
+    echo "Usage: ./setup_env.sh [outputs|experiments|experiments-lock]" >&2
     exit 2
     ;;
 esac

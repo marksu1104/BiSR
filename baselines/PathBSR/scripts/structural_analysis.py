@@ -487,9 +487,7 @@ def main():
     long_df = ranks.merge(feats, on=["dataset", "query_index"], how="inner")
     long_df.to_csv(CACHE_DIR / "structural_valid_long.csv", index=False)
 
-    # Paper-facing path-count outputs for the FB sparse
-    # split trend analysis. These do not replace the older notebook/bar-chart
-    # outputs below; they are additional clean artifacts for the paper.
+    # Paper-facing outputs for the FB sparse-split trend analysis.
     write_fb_pathbucket_share_table(feats)
     write_fb_cardinality_share_table(feats)
     plot_fb_pathcount_grouped_bar(long_df)
