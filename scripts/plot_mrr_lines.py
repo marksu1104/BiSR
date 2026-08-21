@@ -32,6 +32,8 @@ DATASETS = [
 ]
 MODEL_ORDER = [
     "TransE",
+    "DistMult",
+    "ComplEx",
     "ConvE",
     "RotatE",
     "TuckER",
@@ -45,6 +47,8 @@ MODEL_ORDER = [
 ]
 BASELINE_COLORS = [
     "#7c7c7c",
+    "#1f77b4",
+    "#6baed6",
     "#4c72b0",
     "#55a868",
     "#c4a000",
@@ -58,16 +62,14 @@ BASELINE_COLORS = [
 PATHBSR_COLOR = "#cc0000"
 PNG_METADATA = {"Software": "SparseKGC"}
 
-plt.rcParams.update(
-    {
-        "font.family": "DejaVu Sans",
-        "font.size": 11,
-        "axes.edgecolor": "#555555",
-        "axes.linewidth": 0.9,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-    }
-)
+PLOT_STYLE = {
+    "font.family": "DejaVu Sans",
+    "font.size": 11,
+    "axes.edgecolor": "#555555",
+    "axes.linewidth": 0.9,
+    "axes.spines.top": False,
+    "axes.spines.right": False,
+}
 
 
 def load_mrr(path: Path) -> dict[str, list[float]]:
@@ -130,7 +132,7 @@ def draw_panel(ax, data: dict[str, list[float]], title: str, show_legend: bool) 
 
     ax.set_xticks(x_values)
     ax.set_xticklabels(DATASETS, rotation=15, ha="right", fontsize=9.5)
-    ax.set_ylabel("MRR (%)", fontsize=11)
+    ax.set_ylabel("MRR (×100)", fontsize=11)
     ax.set_title(title, fontsize=13, fontweight="bold", pad=10)
     ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(2))
     ax.grid(axis="y", which="major", linestyle="--", alpha=0.30, zorder=0)
@@ -139,8 +141,8 @@ def draw_panel(ax, data: dict[str, list[float]], title: str, show_legend: bool) 
     if show_legend:
         ax.legend(
             loc="upper left",
-            ncol=2,
-            fontsize=8.5,
+            ncol=3,
+            fontsize=8.0,
             framealpha=0.88,
             edgecolor="#cccccc",
             handlelength=1.8,
@@ -163,6 +165,8 @@ def generate(
     table_dir: Path = DEFAULT_TABLE_DIR,
     out: Path = DEFAULT_FIGURE_DIR,
 ) -> list[Path]:
+    plt.rcdefaults()
+    plt.rcParams.update(PLOT_STYLE)
     table_dir = Path(table_dir).resolve()
     out = Path(out).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -188,7 +192,7 @@ def generate(
         handles,
         labels,
         loc="lower center",
-        ncol=6,
+        ncol=7,
         fontsize=9,
         framealpha=0.9,
         edgecolor="#cccccc",

@@ -56,13 +56,11 @@ LABEL_OVERRIDE = {
 }
 PNG_METADATA = {"Software": "SparseKGC"}
 
-plt.rcParams.update(
-    {
-        "font.family": "DejaVu Sans",
-        "axes.edgecolor": "#444444",
-        "axes.linewidth": 0.8,
-    }
-)
+PLOT_STYLE = {
+    "font.family": "DejaVu Sans",
+    "axes.edgecolor": "#444444",
+    "axes.linewidth": 0.8,
+}
 
 
 def load_rows(path: Path) -> dict[str, dict[str, str]]:
@@ -93,6 +91,8 @@ def generate(
     table_dir: Path = DEFAULT_TABLE_DIR,
     out: Path = DEFAULT_FIGURE_DIR,
 ) -> list[Path]:
+    plt.rcdefaults()
+    plt.rcParams.update(PLOT_STYLE)
     table_dir = Path(table_dir).resolve()
     out = Path(out).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -104,7 +104,7 @@ def generate(
     for ax, dataset in zip(axes, EFF_DATASETS):
         points = []
         for method in PLOT_METHODS:
-            mrr = get_value(main_rows, method, f"{dataset}_MRR")
+            mrr = get_value(main_rows, method, f"{dataset}_MRR") * 100.0
             seconds = get_value(efficiency_rows, method, f"{dataset}_raw_s")
             points.append((method, mrr, seconds))
 
@@ -150,7 +150,7 @@ def generate(
         )
         ax.set_xlabel("Runtime (seconds, log scale)", fontsize=10)
         if dataset == EFF_DATASETS[0]:
-            ax.set_ylabel("MRR", fontsize=10)
+            ax.set_ylabel("MRR (×100)", fontsize=10)
         ax.set_title(dataset, fontsize=11, fontweight="bold", pad=8)
         ax.grid(True, which="major", linestyle="--", alpha=0.30, zorder=0)
         ax.grid(True, which="minor", linestyle=":", alpha=0.15, zorder=0)

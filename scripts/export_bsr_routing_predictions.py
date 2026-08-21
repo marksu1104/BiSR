@@ -24,6 +24,7 @@ import argparse
 import csv
 import importlib
 import importlib.util
+import math
 import subprocess
 import sys
 from collections import defaultdict
@@ -91,6 +92,12 @@ def parse_args():
     parser.add_argument("--top-k", type=int, default=200)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu", type=int, default=0)
+    parser.add_argument(
+        "--expected-metrics",
+        type=str,
+        default=None,
+        help="Optional saved metrics CSV used for an independent test-split check.",
+    )
     return parser.parse_args()
 
 
@@ -248,7 +255,7 @@ class TraditionalAdapter:
     translation needed.
     """
 
-    TRANSE_MARGIN = 9.0  # matches baselines/traditional/run_all.py training config
+    TRANSE_MARGIN = 1.0  # matches baselines/traditional/run_all.py training config
 
     def __init__(self, model_name, checkpoint_path, num_entities, num_base_rel, device):
         models_module = _load_traditional_model_classes()
@@ -257,11 +264,17 @@ class TraditionalAdapter:
         margin = self.TRANSE_MARGIN if model_name == "TransE" else 0.0
 
         num_rel_ckpt = int(state_dict["rel_emb.weight"].shape[0])
+        if model_name == "TransE" and num_rel_ckpt != num_base_rel:
+            raise ValueError(
+                "The SparseKGC TransE exporter expects a no-inverse checkpoint "
+                f"with {num_base_rel} relations, but found {num_rel_ckpt}."
+            )
         args = argparse.Namespace(
             num_ent=num_entities,
             num_rel=num_rel_ckpt,
             emb_dim=emb_dim,
             margin=margin,
+            loss="margin" if model_name == "TransE" else "bce",
         )
         model_cls = {"TransE": models_module.TransE,
                      "ConvE": models_module.ConvE,
@@ -274,31 +287,33 @@ class TraditionalAdapter:
         self.checkpoint_path = checkpoint_path
         self.emb_dim = emb_dim
         self.margin = margin
+        self.model_name = model_name
+        self.num_base_rel = num_base_rel
         self.num_rel_ckpt = num_rel_ckpt  # may be < 2*num_base_rel for TransE (no inverse)
 
     def describe_config(self):
         bits = [f"checkpoint={self.checkpoint_path.name}", f"emb_dim={self.emb_dim}"]
         if self.margin:
             bits.append(f"margin={self.margin}")
+        if self.model_name == "TransE":
+            bits.append("distance=l1")
+            bits.append("output=raw")
         return "; ".join(bits)
 
     @torch.no_grad()
     def _score_head_transe(self, query_t, r_base):
-        # Head prediction for TransE (no inverse rels): score(e) = -||e + r - t|| for all e.
-        all_e = self.model.ent_emb.weight          # (num_ent, emb_dim)
-        t_emb = self.model.ent_emb(query_t)        # (batch, emb_dim)
-        r_emb = self.model.rel_emb(r_base)         # (batch, emb_dim)
-        target = t_emb - r_emb                     # (batch, emb_dim): expected head position
-        diff = all_e.unsqueeze(0) - target.unsqueeze(1)  # (batch, num_ent, emb_dim)
-        return -torch.norm(diff, dim=-1)            # (batch, num_ent)
+        # Reuse the model's official L1 head scorer instead of maintaining a
+        # second implementation of score(e) = margin - ||e + r - t||_1.
+        return self.model.score_heads(r_base, query_t)
 
     @torch.no_grad()
     def score_batch(self, query_h_bsr, query_r_bsr):
         h = torch.as_tensor(query_h_bsr, dtype=torch.long, device=self.device)
         r = torch.as_tensor(query_r_bsr, dtype=torch.long, device=self.device)
-        # TransE has no inverse relations; head queries (r >= num_rel_ckpt) need manual compute.
-        if r.max().item() >= self.num_rel_ckpt:
-            is_head = r >= self.num_rel_ckpt
+        # TransE has no inverse relations; head queries use direct (?, r, t)
+        # scoring while tail queries use the model's raw margin score.
+        if self.model_name == "TransE":
+            is_head = r >= self.num_base_rel
             num_ent = self.model.ent_emb.weight.shape[0]
             scores = torch.empty(len(h), num_ent, device=self.device)
             if (~is_head).any():
@@ -306,7 +321,7 @@ class TraditionalAdapter:
                 scores[idx] = self.model(h[idx], r[idx])
             if is_head.any():
                 idx = is_head.nonzero(as_tuple=True)[0]
-                scores[idx] = self._score_head_transe(h[idx], r[idx] - self.num_rel_ckpt)
+                scores[idx] = self._score_head_transe(h[idx], r[idx] - self.num_base_rel)
         else:
             scores = self.model(h, r)
         return scores.detach().cpu().numpy()
@@ -756,7 +771,21 @@ def write_schema(path):
 # Validation
 # ---------------------------------------------------------------------------
 
-def validate_export(output_root, manifest_records, dataset_info, top_k):
+def load_expected_metrics(path):
+    if path is None:
+        return None
+    metrics_path = Path(path).resolve()
+    if not metrics_path.exists():
+        raise FileNotFoundError(f"Expected metrics file not found: {metrics_path}")
+    with open(metrics_path, encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    return {
+        (row.get("Model", row.get("model", "")), row.get("Dataset", row.get("dataset", ""))): row
+        for row in rows
+    }
+
+
+def validate_export(output_root, manifest_records, dataset_info, top_k, expected_metrics=None):
     print("\n" + "=" * 72)
     print("Validating export...")
     print("=" * 72)
@@ -781,10 +810,8 @@ def validate_export(output_root, manifest_records, dataset_info, top_k):
             continue
 
         with open(summary_path, encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            ranks = []
-            for row in reader:
-                ranks.append(float(row["filtered_rank"]))
+            summary_rows = list(csv.DictReader(f))
+        ranks = [float(row["filtered_rank"]) for row in summary_rows]
 
         num_triples = dataset_info[dataset]["num_triples"][split]
         expected_queries = 2 * num_triples
@@ -792,6 +819,62 @@ def validate_export(output_root, manifest_records, dataset_info, top_k):
             errors.append(f"[{label}] query_summary row count {len(ranks)} != 2*num_triples {expected_queries}")
         if int(rec["num_queries"]) != len(ranks):
             errors.append(f"[{label}] manifest num_queries {rec['num_queries']} != query_summary row count {len(ranks)}")
+
+        expected_triples = dataset_info[dataset]["triples"][split]
+        num_base_rel = dataset_info[dataset]["num_base_rel"]
+        for row_number, row in enumerate(summary_rows):
+            triple_index = row_number // 2
+            if triple_index >= len(expected_triples):
+                break
+            h, r, t = expected_triples[triple_index]
+            if row_number % 2 == 0:
+                expected = {
+                    "query_index": row_number,
+                    "direction": "tail",
+                    "original_h": h,
+                    "original_r": r,
+                    "original_t": t,
+                    "query_h": h,
+                    "query_r": r,
+                    "query_t": t,
+                    "gold_entity": t,
+                }
+            else:
+                expected = {
+                    "query_index": row_number,
+                    "direction": "head",
+                    "original_h": h,
+                    "original_r": r,
+                    "original_t": t,
+                    "query_h": t,
+                    "query_r": r + num_base_rel,
+                    "query_t": h,
+                    "gold_entity": h,
+                }
+            mismatched = [
+                key for key, value in expected.items()
+                if row[key] != str(value)
+            ]
+            if mismatched:
+                errors.append(
+                    f"[{label}] query alignment mismatch at row {row_number}: "
+                    + ", ".join(mismatched)
+                )
+                break
+
+        invalid_rank = next(
+            (
+                (index, rank)
+                for index, rank in enumerate(ranks)
+                if not math.isfinite(rank)
+                or rank < 1.0
+                or rank > dataset_info[dataset]["num_entities"]
+            ),
+            None,
+        )
+        if invalid_rank is not None:
+            index, rank = invalid_rank
+            errors.append(f"[{label}] invalid filtered rank {rank} at row {index}")
 
         if ranks:
             recomputed = {
@@ -803,6 +886,28 @@ def validate_export(output_root, manifest_records, dataset_info, top_k):
             for key in ("mrr", "hits@1", "hits@3", "hits@10"):
                 if abs(recomputed[key] - float(rec[key])) > 1e-4:
                     errors.append(f"[{label}] manifest {key}={rec[key]} != recomputed {recomputed[key]:.5f}")
+
+        if expected_metrics is not None and split == "test":
+            expected_row = expected_metrics.get((model, dataset))
+            if expected_row is None:
+                errors.append(f"[{label}] no matching row in the expected metrics CSV")
+            else:
+                metric_columns = {
+                    "mrr": "MRR_Avg",
+                    "hits@1": "Hits@1_Avg",
+                    "hits@3": "Hits@3_Avg",
+                    "hits@10": "Hits@10_Avg",
+                }
+                for metric, column in metric_columns.items():
+                    expected_value = expected_row.get(column, "")
+                    if expected_value in ("", "—"):
+                        errors.append(f"[{label}] expected metrics CSV is missing {column}")
+                        continue
+                    if abs(float(rec[metric]) - float(expected_value)) > 1e-4:
+                        errors.append(
+                            f"[{label}] exported {metric}={rec[metric]} != "
+                            f"saved {column}={expected_value}"
+                        )
 
         with open(candidates_path, encoding="utf-8") as f:
             num_candidate_rows = sum(1 for _ in f) - 1  # minus header
@@ -845,6 +950,7 @@ def main():
 
     source_repo = git_remote_url()
     source_commit = git_commit_hash()
+    expected_metrics = load_expected_metrics(args.expected_metrics)
 
     manifest_rows_root = []
     manifest_rows_by_split = {split: [] for split in args.splits}
@@ -865,7 +971,9 @@ def main():
         true_obj_filter = build_true_object_filter(translated, num_base_rel)
         dataset_info[dataset_name] = {
             "num_entities": len(entities),
+            "num_base_rel": num_base_rel,
             "num_triples": {split: len(translated[split]) for split in ("train", "valid", "test")},
+            "triples": {split: translated[split] for split in args.splits},
         }
         print(f"  num_entities={len(entities)} num_base_relations={num_base_rel} "
               f"train/valid/test={len(translated['train'])}/{len(translated['valid'])}/{len(translated['test'])}")
@@ -957,7 +1065,13 @@ def main():
         print("\nNo (model, dataset, split) combinations were exported -- nothing to validate.")
         return
 
-    validate_export(output_root, manifest_records, dataset_info, args.top_k)
+    validate_export(
+        output_root,
+        manifest_records,
+        dataset_info,
+        args.top_k,
+        expected_metrics=expected_metrics,
+    )
 
     exported_models = sorted({rec["model"] for rec in manifest_records})
     print("\nModels confirmed usable as BSR routing experts (predictions exported & validated): "
