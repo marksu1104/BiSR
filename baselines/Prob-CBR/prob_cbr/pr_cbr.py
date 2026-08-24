@@ -27,6 +27,7 @@ logger.setLevel(logging.INFO)
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts"))
 from metrics_csv import upsert_metrics_csv, METRICS_CSV_HEADER
+from ranking_metrics import sparse_filtered_rank
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 formatter = logging.Formatter("[%(asctime)s \t %(message)s]",
@@ -305,6 +306,69 @@ class ProbCBR(object):
                 rr += 1.0 / rank
         return hits_10, hits_5, hits_3, hits_1, rr
 
+    def _full_entity_hits(
+        self,
+        scored_answers: List[Tuple[str, float]],
+        gold_answers: List[str],
+        query: Tuple[str, str],
+        tie_mode: str,
+    ) -> Tuple[float, float, float, float, float]:
+        """Filtered full-entity metrics shared by the Main and SOTA protocols.
+
+        Entities Prob-CBR did not return (i.e. absent from ``scored_answers``)
+        are ranked at ``default_score=0.0`` rather than skipped. This is a
+        genuine floor for Prob-CBR's scores, not an arbitrary convenience: a
+        candidate's score is a sum of ``path_prior * precision`` terms (see
+        ``rank_answers``/``execute_programs``), both of which are non-negative
+        (precision is a hit-rate in [0, 1]; priors/hop factors are decay
+        weights in [0, 1]), so an entity with no supporting path has a true
+        score of exactly 0 -- the same value returned entities can also
+        legitimately have. Main = average-tie, SOTA = optimistic-tie; both
+        share this identical filtering and full-entity universe.
+        """
+        score_map = dict(scored_answers)
+        true_answers = self.args.all_kg_map[query]
+        hits_10 = hits_5 = hits_3 = hits_1 = reciprocal_rank = 0.0
+        for gold_answer in gold_answers:
+            rank = sparse_filtered_rank(
+                score_map,
+                gold_answer,
+                self.args.ranking_entities,
+                true_answers,
+                tie_mode=tie_mode,
+            )
+            reciprocal_rank += 1.0 / rank
+            hits_10 += rank <= 10
+            hits_5 += rank <= 5
+            hits_3 += rank <= 3
+            hits_1 += rank <= 1
+        return hits_10, hits_5, hits_3, hits_1, reciprocal_rank
+
+    def get_main_protocol_hits(
+        self,
+        scored_answers: List[Tuple[str, float]],
+        gold_answers: List[str],
+        query: Tuple[str, str],
+    ) -> Tuple[float, float, float, float, float]:
+        """Main Protocol: filtered full-entity metrics, average-tie ranking."""
+        return self._full_entity_hits(scored_answers, gold_answers, query, tie_mode="average")
+
+    def get_sota_protocol_hits(
+        self,
+        scored_answers: List[Tuple[str, float]],
+        gold_answers: List[str],
+        query: Tuple[str, str],
+    ) -> Tuple[float, float, float, float, float]:
+        """SOTA Protocol: filtered full-entity metrics, optimistic-tie ranking.
+
+        This replaces the legacy ``get_hits``-based native/SOTA computation,
+        which only ranked the gold answer within Prob-CBR's own returned
+        candidate list (never against the full entity universe) and treated
+        an unreturned gold answer as a hard miss rather than a properly
+        ranked, tied-at-zero candidate.
+        """
+        return self._full_entity_hits(scored_answers, gold_answers, query, tie_mode="optimistic")
+
     @staticmethod
     def get_accuracy(gold_answers: List[str], list_answers: List[str]) -> List[float]:
         all_acc = []
@@ -320,7 +384,12 @@ class ProbCBR(object):
         num_answers = []
         all_acc = []
         non_zero_ctr = 0
-        hits_10, hits_5, hits_3, hits_1, mrr = 0.0, 0.0, 0.0, 0.0, 0.0
+        # Diagnostic-only: ranks the gold answer within Prob-CBR's own returned
+        # candidate list. NOT the thesis Main or SOTA protocol (neither is
+        # full-entity); kept only for the loose-accuracy/per-relation logs below.
+        diag_hits_10, diag_hits_5, diag_hits_3, diag_hits_1, diag_mrr = 0.0, 0.0, 0.0, 0.0, 0.0
+        main_hits_10 = main_hits_5 = main_hits_3 = main_hits_1 = main_mrr = 0.0
+        sota_hits_10 = sota_hits_5 = sota_hits_3 = sota_hits_1 = sota_mrr = 0.0
         per_relation_scores = {}  # map of performance per relation
         per_relation_query_count = {}
         total_examples = 0
@@ -352,6 +421,18 @@ class ProbCBR(object):
             total_examples += len(e2_list)
             if e1 not in self.entity_vocab:
                 all_acc += [0.0] * len(e2_list)
+                _10, _5, _3, _1, rr = self.get_main_protocol_hits([], e2_list, (e1, r))
+                main_hits_10 += _10
+                main_hits_5 += _5
+                main_hits_3 += _3
+                main_hits_1 += _1
+                main_mrr += rr
+                _10, _5, _3, _1, rr = self.get_sota_protocol_hits([], e2_list, (e1, r))
+                sota_hits_10 += _10
+                sota_hits_5 += _5
+                sota_hits_3 += _3
+                sota_hits_1 += _1
+                sota_mrr += rr
                 # put it back
                 self.train_map[(e1, r)] = orig_train_e2_list
                 for e2 in e2_list:
@@ -363,6 +444,18 @@ class ProbCBR(object):
                                                                     num_nn=self.args.k_adj)
             if all_programs is None or len(all_programs) == 0:
                 all_acc += [0.0] * len(e2_list)
+                _10, _5, _3, _1, rr = self.get_main_protocol_hits([], e2_list, (e1, r))
+                main_hits_10 += _10
+                main_hits_5 += _5
+                main_hits_3 += _3
+                main_hits_1 += _1
+                main_mrr += rr
+                _10, _5, _3, _1, rr = self.get_sota_protocol_hits([], e2_list, (e1, r))
+                sota_hits_10 += _10
+                sota_hits_5 += _5
+                sota_hits_3 += _3
+                sota_hits_1 += _1
+                sota_mrr += rr
                 # put it back
                 self.train_map[(e1, r)] = orig_train_e2_list
                 for e2 in e2_list:
@@ -399,14 +492,26 @@ class ProbCBR(object):
             #     pdb.set_trace()
 
             answers = self.rank_answers(answers)
+            _10, _5, _3, _1, rr = self.get_main_protocol_hits(answers, e2_list, (e1, r))
+            main_hits_10 += _10
+            main_hits_5 += _5
+            main_hits_3 += _3
+            main_hits_1 += _1
+            main_mrr += rr
+            _10, _5, _3, _1, rr = self.get_sota_protocol_hits(answers, e2_list, (e1, r))
+            sota_hits_10 += _10
+            sota_hits_5 += _5
+            sota_hits_3 += _3
+            sota_hits_1 += _1
+            sota_mrr += rr
             if len(answers) > 0:
                 acc = self.get_accuracy(e2_list, [k[0] for k in answers])
                 _10, _5, _3, _1, rr = self.get_hits([k[0] for k in answers], e2_list, query=(e1, r))
-                hits_10 += _10
-                hits_5 += _5
-                hits_3 += _3
-                hits_1 += _1
-                mrr += rr
+                diag_hits_10 += _10
+                diag_hits_5 += _5
+                diag_hits_3 += _3
+                diag_hits_1 += _1
+                diag_mrr += rr
                 if args.output_per_relation_scores:
                     if r not in per_relation_scores:
                         per_relation_scores[r] = {"hits_1": 0, "hits_3": 0, "hits_5": 0, "hits_10": 0, "mrr": 0}
@@ -444,11 +549,11 @@ class ProbCBR(object):
         logger.info("Avg number of programs {:3.2f}".format(np.mean(num_programs)))
         logger.info("Avg number of answers after executing the programs: {}".format(np.mean(num_answers)))
         logger.info("Accuracy (Loose): {}".format(np.mean(all_acc)))
-        logger.info("Hits@1 {}".format(hits_1 / total_examples))
-        logger.info("Hits@3 {}".format(hits_3 / total_examples))
-        logger.info("Hits@5 {}".format(hits_5 / total_examples))
-        logger.info("Hits@10 {}".format(hits_10 / total_examples))
-        logger.info("MRR {}".format(mrr / total_examples))
+        logger.info("[diagnostic, candidate-list-only, not the thesis protocol] Hits@1 {}".format(diag_hits_1 / total_examples))
+        logger.info("[diagnostic, candidate-list-only, not the thesis protocol] Hits@3 {}".format(diag_hits_3 / total_examples))
+        logger.info("[diagnostic, candidate-list-only, not the thesis protocol] Hits@5 {}".format(diag_hits_5 / total_examples))
+        logger.info("[diagnostic, candidate-list-only, not the thesis protocol] Hits@10 {}".format(diag_hits_10 / total_examples))
+        logger.info("[diagnostic, candidate-list-only, not the thesis protocol] MRR {}".format(diag_mrr / total_examples))
         logger.info("Avg number of nn, that do not have the query relation: {}".format(
             np.mean(self.all_zero_ctr)))
         logger.info("Avg num of returned nearest neighbors: {:2.4f}".format(np.mean(self.all_num_ret_nn)))
@@ -463,13 +568,15 @@ class ProbCBR(object):
                 logger.info("=====" * 2)
         if self.args.use_wandb:
             # Log all metrics
-            wandb.log({'hits_1': hits_1 / total_examples, 'hits_3': hits_3 / total_examples,
-                       'hits_5': hits_5 / total_examples, 'hits_10': hits_10 / total_examples,
-                       'mrr': mrr / total_examples, 'total_examples': total_examples, 'non_zero_ctr': non_zero_ctr,
+            wandb.log({'hits_1': diag_hits_1 / total_examples, 'hits_3': diag_hits_3 / total_examples,
+                       'hits_5': diag_hits_5 / total_examples, 'hits_10': diag_hits_10 / total_examples,
+                       'mrr': diag_mrr / total_examples, 'total_examples': total_examples, 'non_zero_ctr': non_zero_ctr,
                        'all_zero_ctr': self.all_zero_ctr, 'avg_num_nn': np.mean(self.all_num_ret_nn),
                        'avg_num_prog': np.mean(num_programs), 'avg_num_ans': np.mean(num_answers),
                        'avg_num_failed_prog': np.mean(self.num_non_executable_programs), 'acc_loose': np.mean(all_acc)})
-        return hits_1, hits_3, hits_5, hits_10, mrr, total_examples
+        main = (main_hits_1, main_hits_3, main_hits_5, main_hits_10, main_mrr, total_examples)
+        sota = (sota_hits_1, sota_hits_3, sota_hits_5, sota_hits_10, sota_mrr, total_examples)
+        return main, sota
 
     def calc_precision_map(self, output_filenm=""):
         """
@@ -681,6 +788,11 @@ def main(args):
                 inv_entries[(e2, r_inv)].append(e1)
     for k, v in inv_entries.items():
         all_kg_map[k].extend(v)
+    args.ranking_entities = {
+        entity
+        for (head, _), tails in all_kg_map.items()
+        for entity in [head, *tails]
+    }
     args.all_kg_map = all_kg_map
 
     prob_cbr_agent = ProbCBR(args, train_map, eval_map, entity_vocab, rev_entity_vocab, rel_vocab,
@@ -765,7 +877,7 @@ def main(args):
     if not args.only_preprocess:
         # Tail prediction
         logger.info("Running tail prediction (original direction)...")
-        t_h1, t_h3, t_h5, t_h10, t_mrr, t_total = prob_cbr_agent.do_symbolic_case_based_reasoning()
+        t_main, t_sota = prob_cbr_agent.do_symbolic_case_based_reasoning()
 
         # Head prediction via inverse queries
         logger.info("Running head prediction (inverse direction)...")
@@ -776,7 +888,12 @@ def main(args):
             for e2 in e2_list:
                 if e1 not in inv_eval_map[(e2, r_inv)]:
                     inv_eval_map[(e2, r_inv)].append(e1)
-        h_h1, h_h3, h_h5, h_h10, h_mrr, h_total = prob_cbr_agent.do_symbolic_case_based_reasoning(inv_eval_map)
+        h_main, h_sota = prob_cbr_agent.do_symbolic_case_based_reasoning(inv_eval_map)
+
+        t_h1, t_h3, t_h5, t_h10, t_mrr, t_total = t_main
+        h_h1, h_h3, h_h5, h_h10, h_mrr, h_total = h_main
+        st_h1, st_h3, st_h5, st_h10, st_mrr, st_total = t_sota
+        sh_h1, sh_h3, sh_h5, sh_h10, sh_mrr, sh_total = h_sota
 
         # Average bidirectional metrics
         total = t_total + h_total
@@ -816,6 +933,36 @@ def main(args):
                 tail_h10, head_h10, avg_h10,
             )
         )
+        # SOTA Protocol (thesis Table 5): tail-only, filtered, full-entity,
+        # optimistic-tie ranking -- computed via get_sota_protocol_hits /
+        # sparse_filtered_rank(tie_mode="optimistic"), the same full-entity
+        # universe and filtering as the Main Protocol above. This replaces the
+        # former native/candidate-list-only computation, which only ranked
+        # the gold answer within Prob-CBR's own returned candidates rather
+        # than the full entity set and is therefore not a valid Full-entity-set
+        # SOTA number under thesis Table 5.
+        sota_total = st_total + sh_total
+        sota_avg_mrr = (st_mrr + sh_mrr) / sota_total
+        sota_avg_h1 = (st_h1 + sh_h1) / sota_total
+        sota_avg_h3 = (st_h3 + sh_h3) / sota_total
+        sota_avg_h10 = (st_h10 + sh_h10) / sota_total
+        sota_tail_mrr, sota_head_mrr = st_mrr / st_total, sh_mrr / sh_total
+        sota_tail_h1, sota_head_h1 = st_h1 / st_total, sh_h1 / sh_total
+        sota_tail_h3, sota_head_h3 = st_h3 / st_total, sh_h3 / sh_total
+        sota_tail_h10, sota_head_h10 = st_h10 / st_total, sh_h10 / sh_total
+        logger.info(
+            "FINAL_SOTA_METRICS baseline=Prob-CBR model=Prob-CBR dataset={} split={} "
+            "mrr_tail={:.5f} mrr_head={:.5f} mrr_avg={:.5f} "
+            "h1_tail={:.5f} h1_head={:.5f} h1_avg={:.5f} "
+            "h3_tail={:.5f} h3_head={:.5f} h3_avg={:.5f} "
+            "h10_tail={:.5f} h10_head={:.5f} h10_avg={:.5f}".format(
+                args.dataset_name, split_label,
+                sota_tail_mrr, sota_head_mrr, sota_avg_mrr,
+                sota_tail_h1, sota_head_h1, sota_avg_h1,
+                sota_tail_h3, sota_head_h3, sota_avg_h3,
+                sota_tail_h10, sota_head_h10, sota_avg_h10,
+            )
+        )
         if hasattr(args, "_run_start_time"):
             seconds = time.perf_counter() - args._run_start_time
             logger.info("RUNTIME_STD baseline=Prob-CBR model=Prob-CBR dataset={} seconds={:.3f}".format(
@@ -830,6 +977,15 @@ def main(args):
                 f"{tail_h1:.5f}", f"{head_h1:.5f}", f"{avg_h1:.5f}",
                 f"{tail_h3:.5f}", f"{head_h3:.5f}", f"{avg_h3:.5f}",
                 f"{tail_h10:.5f}", f"{head_h10:.5f}", f"{avg_h10:.5f}",
+                f"{seconds:.3f}",
+            ])
+            sota_path = os.path.join(timing_dir, "probcbr_sota_metrics.csv")
+            upsert_metrics_csv(sota_path, [
+                args.dataset_name, "Prob-CBR",
+                f"{sota_tail_mrr:.5f}", f"{sota_head_mrr:.5f}", f"{sota_avg_mrr:.5f}",
+                f"{sota_tail_h1:.5f}", f"{sota_head_h1:.5f}", f"{sota_avg_h1:.5f}",
+                f"{sota_tail_h3:.5f}", f"{sota_head_h3:.5f}", f"{sota_avg_h3:.5f}",
+                f"{sota_tail_h10:.5f}", f"{sota_head_h10:.5f}", f"{sota_avg_h10:.5f}",
                 f"{seconds:.3f}",
             ])
 

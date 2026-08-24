@@ -74,6 +74,27 @@ def get_combined_results(left_results, right_results):
 		results['hits@{}'.format(k+1)]			= round((left_results['hits@{}'.format(k+1)] + right_results['hits@{}'.format(k+1)])/(2*count), 5)
 	return results
 
+
+def get_combined_sota_results(left_results, right_results):
+	"""Same aggregation as get_combined_results, but over the optimistic-tie
+	(SOTA Protocol) counters predict() accumulates alongside the average-tie
+	(Main Protocol) ones. left=tail, right=head, matching get_combined_results."""
+	results = {}
+	count   = float(left_results['count'])
+
+	results['left_mr']		= round(left_results ['sota_mr'] /count, 5)
+	results['left_mrr']		= round(left_results ['sota_mrr']/count, 5)
+	results['right_mr']		= round(right_results['sota_mr'] /count, 5)
+	results['right_mrr']	= round(right_results['sota_mrr']/count, 5)
+	results['mr']			= round((left_results['sota_mr']  + right_results['sota_mr']) /(2*count), 5)
+	results['mrr']			= round((left_results['sota_mrr'] + right_results['sota_mrr'])/(2*count), 5)
+
+	for k in range(10):
+		results['left_hits@{}'.format(k+1)]		= round(left_results ['sota_hits@{}'.format(k+1)]/count, 5)
+		results['right_hits@{}'.format(k+1)]	= round(right_results['sota_hits@{}'.format(k+1)]/count, 5)
+		results['hits@{}'.format(k+1)]			= round((left_results['sota_hits@{}'.format(k+1)] + right_results['sota_hits@{}'.format(k+1)])/(2*count), 5)
+	return results
+
 def get_param(shape):
 	param = Parameter(torch.Tensor(*shape)); 	
 	xavier_normal_(param.data)

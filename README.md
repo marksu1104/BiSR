@@ -94,7 +94,15 @@ Supply site-specific options such as `--account` or `--partition` through
 | Main | Bidirectional tail and inverse-head queries | Average rank for ties | Full-entity filtered |
 | SOTA comparison | Tail queries only | Optimistic first match | Full-entity filtered |
 
-Results are not copied between protocols when native evaluation semantics differ.
+Both protocols rank over the full entity set and share the same filtering and
+scoring; they differ only in tie handling. Sparse candidate methods (Prob-CBR,
+AnyBURL, LoGRe, StruProKGR) assign score zero to entities they did not return,
+which is each method's own definition of "no evidence" (their candidate scores
+are non-negative sums), not an arbitrary placeholder. SOTA metrics are computed
+independently under optimistic-tie handling from the same underlying
+predictions as Main, not copied or reused from a method's native/original
+tail-only output. See `REPRODUCIBILITY.md` for the per-baseline evaluator
+mapping.
 
 ## Repository Structure
 

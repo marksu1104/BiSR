@@ -247,6 +247,7 @@ class Runner(object):
         left_results  = self.predict(split=split, mode='tail_batch')
         right_results = self.predict(split=split, mode='head_batch')
         results       = get_combined_results(left_results, right_results)
+        self._last_sota_results = get_combined_sota_results(left_results, right_results)
         log_split = split
         if emit_detail:
             self.logger.info('[Epoch {} {}]: MRR: Tail : {:.5}, Head : {:.5}, Avg : {:.5}'.format(epoch, log_split, results['left_mrr'], results['right_mrr'], results['mrr']))
@@ -259,14 +260,14 @@ class Runner(object):
 
         return results
 
-    def log_final_metrics(self, results, split_label='test'):
+    def log_final_metrics(self, results, split_label='test', record_name='FINAL_EVAL_METRICS'):
         self.logger.info(
-            'FINAL_EVAL_METRICS baseline=HoGRN model={} dataset={} split={} '
+            '{} baseline=HoGRN model={} dataset={} split={} '
             'mrr_tail={:.5f} mrr_head={:.5f} mrr_avg={:.5f} '
             'h1_tail={:.5f} h1_head={:.5f} h1_avg={:.5f} '
             'h3_tail={:.5f} h3_head={:.5f} h3_avg={:.5f} '
             'h10_tail={:.5f} h10_head={:.5f} h10_avg={:.5f}'.format(
-                self.p.score_func, self.p.dataset, split_label,
+                record_name, self.p.score_func, self.p.dataset, split_label,
                 results['left_mrr'], results['right_mrr'], results['mrr'],
                 results['left_hits@1'], results['right_hits@1'], results['hits@1'],
                 results['left_hits@3'], results['right_hits@3'], results['hits@3'],
@@ -274,11 +275,11 @@ class Runner(object):
             )
         )
 
-    def append_metrics_csv(self, results, seconds):
+    def append_metrics_csv(self, results, seconds, filename='hogrn_metrics.csv'):
         output_root = os.environ.get("SPARSEKGC_OUTPUT_DIR")
         timing_dir = Path(output_root) if output_root else Path("timings") / "hogrn"
         timing_dir.mkdir(parents=True, exist_ok=True)
-        path = timing_dir / "hogrn_metrics.csv"
+        path = timing_dir / filename
         upsert_metrics_csv(str(path), [
             self.p.dataset,
             self.p.score_func,
@@ -293,7 +294,12 @@ class Runner(object):
 
     def predict(self, split='valid', mode='tail_batch'):
         """
-        Function to run model evaluation for a given mode
+        Function to run model evaluation for a given mode.
+
+        Computes both the Main Protocol (average-tie) and SOTA Protocol
+        (optimistic-tie) filtered full-entity ranks from the same dense
+        `pred` score tensor in one pass, since the two protocols share
+        identical filtering and only differ in tie handling.
         """
         self.model.eval()
 
@@ -311,13 +317,17 @@ class Runner(object):
                 pred[b_range, obj] = target_pred
                 greater = (pred > target_pred.unsqueeze(1)).sum(dim=1).float()
                 equal = (pred == target_pred.unsqueeze(1)).sum(dim=1).float()
-                ranks = greater + (equal + 1.0) / 2.0
+                avg_ranks = greater + (equal + 1.0) / 2.0
+                opt_ranks = greater + 1.0
 
-                results['count'] = torch.numel(ranks) + results.get('count', 0.0)
-                results['mr'] = torch.sum(ranks).item() + results.get('mr', 0.0)
-                results['mrr'] = torch.sum(1.0 / ranks).item() + results.get('mrr', 0.0)
+                results['count'] = torch.numel(avg_ranks) + results.get('count', 0.0)
+                results['mr'] = torch.sum(avg_ranks).item() + results.get('mr', 0.0)
+                results['mrr'] = torch.sum(1.0 / avg_ranks).item() + results.get('mrr', 0.0)
+                results['sota_mr'] = torch.sum(opt_ranks).item() + results.get('sota_mr', 0.0)
+                results['sota_mrr'] = torch.sum(1.0 / opt_ranks).item() + results.get('sota_mrr', 0.0)
                 for k in range(10):
-                    results['hits@{}'.format(k+1)] = torch.numel(ranks[ranks <= (k+1)]) + results.get('hits@{}'.format(k+1), 0.0)
+                    results['hits@{}'.format(k+1)] = torch.numel(avg_ranks[avg_ranks <= (k+1)]) + results.get('hits@{}'.format(k+1), 0.0)
+                    results['sota_hits@{}'.format(k+1)] = torch.numel(opt_ranks[opt_ranks <= (k+1)]) + results.get('sota_hits@{}'.format(k+1), 0.0)
 
                 # if step % 100 == 0:
                 # 	self.logger.info('[{}, {} Step {}]'.format(split.title(), mode.title(), step))
@@ -493,6 +503,11 @@ class Runner(object):
             self.logger.info('Final Avg MRR: {:.5}'.format(test_results['mrr']))
             self.log_final_metrics(test_results)
             self.append_metrics_csv(test_results, time.perf_counter() - run_start)
+            # SOTA Protocol (thesis Table 5): tail-only, filtered, full-entity,
+            # optimistic-tie -- computed from the same forward-pass scores as
+            # test_results above (see predict()/get_combined_sota_results()).
+            self.log_final_metrics(self._last_sota_results, split_label='test-sota', record_name='FINAL_SOTA_METRICS')
+            self.append_metrics_csv(self._last_sota_results, time.perf_counter() - run_start, filename='hogrn_sota_metrics.csv')
             self.dump_error_cases('test', topk=getattr(self.p, 'topk', 10))
             self.dump_error_cases('valid', topk=getattr(self.p, 'topk', 10))
             self.dump_error_cases('train', topk=getattr(self.p, 'topk', 10))
@@ -532,6 +547,11 @@ class Runner(object):
         self.logger.info('Final Avg MRR: {:.5}'.format(test_results['mrr']))
         self.log_final_metrics(test_results)
         self.append_metrics_csv(test_results, time.perf_counter() - run_start)
+        # SOTA Protocol (thesis Table 5): tail-only, filtered, full-entity,
+        # optimistic-tie -- computed from the same forward-pass scores as
+        # test_results above (see predict()/get_combined_sota_results()).
+        self.log_final_metrics(self._last_sota_results, split_label='test-sota', record_name='FINAL_SOTA_METRICS')
+        self.append_metrics_csv(self._last_sota_results, time.perf_counter() - run_start, filename='hogrn_sota_metrics.csv')
 
         if getattr(self.p, 'dump_errors', False):
             self.dump_error_cases('test', topk=getattr(self.p, 'topk', 10))

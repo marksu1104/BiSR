@@ -11,11 +11,15 @@
 import numpy as np
 import pickle
 import sys
+from pathlib import Path
 
 import torch
 
 from src.parse_args import args
 from src.data_utils import NO_OP_ENTITY_ID, DUMMY_ENTITY_ID
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+from ranking_metrics import rank_from_counts
 
 
 def compute_mrr_only(examples, scores, all_answers, verbose=False):
@@ -140,6 +144,65 @@ def hits_and_ranks(examples, scores, all_answers, verbose=False, output=False, k
                 print('{}\t{}\t{}'.format(term[0], term[1], example_length[kg.relation2id[term[0]]]))
 
     return hits_at_1, hits_at_3, hits_at_5, hits_at_10, mrr
+
+
+def hits_and_ranks_full_entity(examples, scores, all_answers, tie_mode, verbose=False):
+    """Full-entity filtered metrics computed over the complete score tensor.
+
+    Unlike ``hits_and_ranks`` below, this never truncates to ``args.beam_size``:
+    every entity in ``scores`` (already a dense per-entity score vector from
+    the model's forward pass) participates in the rank computation. Both the
+    Main Protocol (``tie_mode="average"``) and the SOTA Protocol
+    (``tie_mode="optimistic"``) share this same full-entity, filtered logic
+    and differ only in how ties are broken -- see scripts/ranking_metrics.py.
+    """
+    assert len(examples) == scores.shape[0]
+    ranks = []
+    special_entities = {DUMMY_ENTITY_ID, NO_OP_ENTITY_ID}
+    for i, (e1, e2, r) in enumerate(examples):
+        target_score = scores[i, e2].clone()
+        filtered = special_entities.union(all_answers[e1][r])
+        filtered.discard(e2)
+        if filtered:
+            scores[i, list(filtered)] = -torch.inf
+        scores[i, e2] = target_score
+        greater = int((scores[i] > target_score).sum().item())
+        equal = int((scores[i] == target_score).sum().item())
+        ranks.append(rank_from_counts(greater, equal, tie_mode))
+
+    ranks = np.asarray(ranks, dtype=np.float64)
+    metrics = (
+        float(np.mean(ranks <= 1)),
+        float(np.mean(ranks <= 3)),
+        float(np.mean(ranks <= 5)),
+        float(np.mean(ranks <= 10)),
+        float(np.mean(1.0 / ranks)),
+    )
+    if verbose:
+        label = tie_mode.capitalize()
+        print('{}-tie full-entity Hits@1 = {}'.format(label, metrics[0]))
+        print('{}-tie full-entity Hits@3 = {}'.format(label, metrics[1]))
+        print('{}-tie full-entity Hits@5 = {}'.format(label, metrics[2]))
+        print('{}-tie full-entity Hits@10 = {}'.format(label, metrics[3]))
+        print('{}-tie full-entity MRR = {}'.format(label, metrics[4]))
+    return metrics
+
+
+def hits_and_ranks_average_tie(examples, scores, all_answers, verbose=False):
+    """Main Protocol: full-entity filtered metrics with average-tie ranking."""
+    return hits_and_ranks_full_entity(examples, scores, all_answers, "average", verbose=verbose)
+
+
+def hits_and_ranks_optimistic_tie(examples, scores, all_answers, verbose=False):
+    """SOTA Protocol: full-entity filtered metrics with optimistic-tie ranking.
+
+    This intentionally does NOT use ``hits_and_ranks`` below, which truncates
+    ranking to the top ``args.beam_size`` scored entities (128 for every
+    dataset in this repository) and therefore does not implement full-entity
+    ranking. Full-entity ranking is required by both protocols; only the
+    tie-breaking rule differs between them.
+    """
+    return hits_and_ranks_full_entity(examples, scores, all_answers, "optimistic", verbose=verbose)
 
 def hits_at_k(examples, scores, all_answers, verbose=False):
     """
@@ -375,4 +438,3 @@ def export_error_cases(examples, scores, all_answers, output_path):
                  
     print('{}/{} top-1 error cases written to {}'.format(len(top_1_errors), len(examples), output_path))
     print('{}/{} top-10 error cases written to {}'.format(len(top_10_errors), len(examples), output_path))
-

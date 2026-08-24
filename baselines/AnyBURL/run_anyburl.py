@@ -90,11 +90,11 @@ def run_java(java, jar, mainclass, config, cwd, xmx, log_fh):
     return proc.returncode
 
 
-def metrics_csv_path():
+def metrics_csv_path(suffix=""):
     root = os.environ.get("SPARSEKGC_OUTPUT_DIR")
     base = Path(root) if root else (REPO_ROOT / "outputs")
     base.mkdir(parents=True, exist_ok=True)
-    return base / "anyburl_metrics.csv"
+    return base / f"anyburl{suffix}_metrics.csv"
 
 
 def baseline_log_dir():
@@ -127,7 +127,8 @@ def run_one(dataset, args):
             raise RuntimeError(f"AnyBURL Apply produced no predictions (exit {rc}): {pred_file}")
     seconds = time.perf_counter() - start
 
-    res = evaluate(str(pred_file), str(work_dir))
+    # Main Protocol: bidirectional, filtered, full-entity, average-tie.
+    res = evaluate(str(pred_file), str(work_dir), tie_mode="average")
     final_line = (
         "FINAL_EVAL_METRICS baseline=anyburl model=AnyBURL dataset={} split=test "
         "mrr_tail={:.5f} mrr_head={:.5f} mrr_avg={:.5f} "
@@ -147,6 +148,19 @@ def run_one(dataset, args):
         f"{res['tail']['h1']:.5f}", f"{res['head']['h1']:.5f}", f"{res['avg']['h1']:.5f}",
         f"{res['tail']['h3']:.5f}", f"{res['head']['h3']:.5f}", f"{res['avg']['h3']:.5f}",
         f"{res['tail']['h10']:.5f}", f"{res['head']['h10']:.5f}", f"{res['avg']['h10']:.5f}",
+        f"{seconds:.3f}",
+    ])
+
+    # SOTA Protocol (thesis Table 5): tail-only, filtered, full-entity,
+    # optimistic-tie -- same predictions and filtering as above, computed from
+    # the same pred_file with no separate AnyBURL run required.
+    sota_res = evaluate(str(pred_file), str(work_dir), tie_mode="optimistic")
+    upsert_metrics_csv(str(metrics_csv_path("_sota")), [
+        dataset, "AnyBURL",
+        f"{sota_res['tail']['mrr']:.5f}", f"{sota_res['head']['mrr']:.5f}", f"{sota_res['avg']['mrr']:.5f}",
+        f"{sota_res['tail']['h1']:.5f}", f"{sota_res['head']['h1']:.5f}", f"{sota_res['avg']['h1']:.5f}",
+        f"{sota_res['tail']['h3']:.5f}", f"{sota_res['head']['h3']:.5f}", f"{sota_res['avg']['h3']:.5f}",
+        f"{sota_res['tail']['h10']:.5f}", f"{sota_res['head']['h10']:.5f}", f"{sota_res['avg']['h10']:.5f}",
         f"{seconds:.3f}",
     ])
     print_result(timestamp(), "anyburl", "AnyBURL", dataset, log_file, None, final_line, seconds, "ok")

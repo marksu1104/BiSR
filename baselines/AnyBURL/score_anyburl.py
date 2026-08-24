@@ -32,6 +32,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from metrics_csv import upsert_metrics_csv  # noqa: E402
+from ranking_metrics import rank_from_counts  # noqa: E402
 
 
 def load_triples_hrt(path):
@@ -101,11 +102,17 @@ def parse_predictions(pred_path):
         i += 3
 
 
-def tie_aware_rank(cands, target, filtered_others, num_entities):
-    """Filtered tie-aware rank of `target` given AnyBURL candidate (entity,score).
+def tie_aware_rank(cands, target, filtered_others, num_entities, tie_mode="average"):
+    """Filtered full-entity rank of `target` given AnyBURL candidate (entity,score).
 
-    Entities not in `cands` have score 0. `filtered_others` (known-true entities
-    other than the target) are masked out of the ranking entirely.
+    Entities not in `cands` have score 0 -- AnyBURL rule confidences are
+    non-negative by construction (a rule's confidence is a hit-rate in
+    [0, 1]), so an entity no rule fired for has a true confidence of exactly
+    0, the same floor a returned candidate can also have. `filtered_others`
+    (known-true entities other than the target) are masked out of the
+    ranking entirely. `tie_mode="average"` is the Main Protocol;
+    `tie_mode="optimistic"` is the SOTA Protocol; both share this identical
+    filtering and full-entity universe.
     """
     # candidate score map, excluding masked entities; dedupe keeping max score
     score = {}
@@ -123,7 +130,6 @@ def tie_aware_rank(cands, target, filtered_others, num_entities):
     if target_score > 0.0:
         greater = sum(1 for e, s in score.items() if s > target_score)
         equal = sum(1 for e, s in score.items() if s == target_score)  # includes target
-        return greater + (equal + 1.0) / 2.0
     else:
         # target unpredicted (score 0). All positive-score candidates beat it.
         pos = sum(1 for s in score.values() if s > 0.0)
@@ -131,10 +137,10 @@ def tie_aware_rank(cands, target, filtered_others, num_entities):
         # entities tied at score 0 = non-masked entities that are not positive
         # candidates (includes the target).
         equal = num_nonmasked - pos
-        return greater + (equal + 1.0) / 2.0
+    return rank_from_counts(greater, equal, tie_mode)
 
 
-def evaluate(pred_path, work_dir):
+def evaluate(pred_path, work_dir, tie_mode="average"):
     tails_known, heads_known, num_ent = build_filters(work_dir)
 
     agg = {d: {"mrr": 0.0, "h1": 0, "h3": 0, "h10": 0, "n": 0} for d in ("tail", "head")}
@@ -142,10 +148,10 @@ def evaluate(pred_path, work_dir):
     for h, r, t, heads_list, tails_list in parse_predictions(pred_path):
         # tail prediction: query (h, r, ?), target t
         filt_t = tails_known.get((h, r), set()) - {t}
-        rank_t = tie_aware_rank(tails_list, t, filt_t, num_ent)
+        rank_t = tie_aware_rank(tails_list, t, filt_t, num_ent, tie_mode=tie_mode)
         # head prediction: query (?, r, t), target h
         filt_h = heads_known.get((r, t), set()) - {h}
-        rank_h = tie_aware_rank(heads_list, h, filt_h, num_ent)
+        rank_h = tie_aware_rank(heads_list, h, filt_h, num_ent, tie_mode=tie_mode)
 
         for d, rank in (("tail", rank_t), ("head", rank_h)):
             a = agg[d]

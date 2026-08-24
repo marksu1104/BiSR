@@ -8,6 +8,7 @@ Thesis_*.pdf
 baselines/**/checkpoints/
 baselines/**/log/
 baselines/**/logs/
+baselines/HoGRN/error_cases/
 # Python
 __pycache__/
 *.pyc
@@ -22,6 +23,7 @@ __pycache__/
 checkpoints/
 
 # Baseline auxiliary files
+baselines/Prob-CBR/prob-cbr-data/
 baselines/**/timings/
 baselines/DacKGR/model/
 baselines/DacKGR/data/**/adj_list.pkl

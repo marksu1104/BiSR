@@ -22,13 +22,17 @@ FIGURE_DIR = RESULTS_DIR / "figures"
 
 EXPECTED_METRICS = {
     "anyburl_metrics.csv": 6,
+    "anyburl_sota_metrics.csv": 6,
     "dackgr_metrics.csv": 6,
+    "dackgr_sota_metrics.csv": 6,
     "hogrn_metrics.csv": 6,
+    "hogrn_sota_metrics.csv": 6,
     "logre_metrics.csv": 5,
     "logre_sota_metrics.csv": 5,
     "pathbsr_metrics.csv": 6,
     "pathbsr_sota_metrics.csv": 6,
     "probcbr_metrics.csv": 6,
+    "probcbr_sota_metrics.csv": 6,
     "struprokgr_metrics.csv": 5,
     "struprokgr_sota_metrics.csv": 5,
     "traditional_metrics.csv": 36,

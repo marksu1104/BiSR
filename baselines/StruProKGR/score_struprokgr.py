@@ -33,6 +33,9 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from ranking_metrics import rank_from_counts  # noqa: E402
+
 
 def load_sparsekgc_triples(data_dir: Path, dataset: str):
     """Build filter maps and entity set from SparseKGC-format data (h t r)."""
@@ -70,33 +73,42 @@ def load_dump(dump_path: Path):
     return rows
 
 
-def tie_aware_rank(gold_score, n_higher, n_tied_in_pred, filter_size, total_entities):
-    """Full-entity tie-aware rank of gold_answer.
+def tie_aware_rank(gold_score, n_higher, n_tied_in_pred, filter_size, total_entities, tie_mode="average"):
+    """Full-entity filtered rank of gold_answer.
 
-    gold_score: StruProKGR's final score for the gold (0.0 if unpredicted)
+    gold_score: StruProKGR's final score for the gold (0.0 if unpredicted).
+      Scores are sums of precision * hop_factor terms (both non-negative: a
+      precision is a hit-rate in [0, 1], hop_factor is a non-negative decay
+      weight), so an unpredicted gold answer's true score is exactly 0 -- the
+      same floor a predicted-but-zero-scored entity can also have. This is
+      not an arbitrary default; it is the method's own definition of "no
+      supporting path".
     n_higher: # predicted entities (after filter) with score > gold_score
     n_tied_in_pred: # predicted entities (after filter) with score == gold_score
     filter_size: # entities masked out (other known-true answers)
     total_entities: total entities in the KG
+    tie_mode: "average" (Main Protocol) or "optimistic" (SOTA Protocol); both
+      share this identical filtering and full-entity universe.
     """
     num_nonmasked = total_entities - filter_size
     if gold_score > 0.0:
         # gold is among predicted entities
         # n_tied_in_pred already includes gold itself
-        return n_higher + (n_tied_in_pred + 1.0) / 2.0
+        return rank_from_counts(n_higher, n_tied_in_pred, tie_mode)
     else:
         # gold score = 0; all unpredicted entities also have score 0
         # n_higher = # predicted non-zero entities in filtered set
         # n_tied = total zero-score entities = non-masked - n_higher
         n_zero = num_nonmasked - n_higher
-        return n_higher + (n_zero + 1.0) / 2.0
+        return rank_from_counts(n_higher, n_zero, tie_mode)
 
 
-def evaluate(forward_dump: Path, inverse_dump: Path, data_dir: Path, dataset: str):
-    """Compute bidirectional tie-aware metrics.
+def evaluate(forward_dump: Path, inverse_dump: Path, data_dir: Path, dataset: str, tie_mode: str = "average"):
+    """Compute bidirectional filtered metrics.
 
     forward_dump: dump from running StruProKGR with test.triples (tail queries h r ?)
     inverse_dump: dump from running StruProKGR with test_inv.triples (head queries t r_inv ?)
+    tie_mode: "average" (Main Protocol) or "optimistic" (SOTA Protocol).
     """
     tails_known, heads_known, n_ent = load_sparsekgc_triples(data_dir, dataset)
 
@@ -106,7 +118,7 @@ def evaluate(forward_dump: Path, inverse_dump: Path, data_dir: Path, dataset: st
     # tail queries: forward dump
     for h, r, gold_t, gold_sc, n_higher, n_tied in load_dump(forward_dump):
         filter_set = tails_known.get((h, r), set()) - {gold_t}
-        rank = tie_aware_rank(gold_sc, n_higher, n_tied, len(filter_set), n_ent)
+        rank = tie_aware_rank(gold_sc, n_higher, n_tied, len(filter_set), n_ent, tie_mode=tie_mode)
         a = agg["tail"]
         a["mrr"] += 1.0 / rank
         a["h1"]  += 1.0 if rank <= 1 else 0.0
@@ -118,23 +130,27 @@ def evaluate(forward_dump: Path, inverse_dump: Path, data_dir: Path, dataset: st
     def _orig_rel(r_inv: str) -> str:
         return r_inv[:-4] if r_inv.endswith("_inv") else r_inv + "_inv"
 
-    for t, r_inv, gold_h, gold_sc, n_higher, n_tied in load_dump(inverse_dump):
-        orig_r = _orig_rel(r_inv)
-        filter_set = heads_known.get((orig_r, t), set()) - {gold_h}
-        rank = tie_aware_rank(gold_sc, n_higher, n_tied, len(filter_set), n_ent)
-        a = agg["head"]
-        a["mrr"] += 1.0 / rank
-        a["h1"]  += 1.0 if rank <= 1 else 0.0
-        a["h3"]  += 1.0 if rank <= 3 else 0.0
-        a["h10"] += 1.0 if rank <= 10 else 0.0
-        a["n"]   += 1
+    if inverse_dump is not None:
+        for t, r_inv, gold_h, gold_sc, n_higher, n_tied in load_dump(inverse_dump):
+            orig_r = _orig_rel(r_inv)
+            filter_set = heads_known.get((orig_r, t), set()) - {gold_h}
+            rank = tie_aware_rank(gold_sc, n_higher, n_tied, len(filter_set), n_ent, tie_mode=tie_mode)
+            a = agg["head"]
+            a["mrr"] += 1.0 / rank
+            a["h1"]  += 1.0 if rank <= 1 else 0.0
+            a["h3"]  += 1.0 if rank <= 3 else 0.0
+            a["h10"] += 1.0 if rank <= 10 else 0.0
+            a["n"]   += 1
 
     res = {}
     for d in ("tail", "head"):
         a = agg[d]
         n = max(a["n"], 1)
         res[d] = {k: a[k] / n for k in ("mrr", "h1", "h3", "h10")}
-    res["avg"] = {k: (res["tail"][k] + res["head"][k]) / 2.0 for k in ("mrr", "h1", "h3", "h10")}
+    if agg["head"]["n"] > 0:
+        res["avg"] = {k: (res["tail"][k] + res["head"][k]) / 2.0 for k in ("mrr", "h1", "h3", "h10")}
+    else:
+        res["avg"] = dict(res["tail"])
     res["tail_n"] = agg["tail"]["n"]
     res["head_n"] = agg["head"]["n"]
     return res

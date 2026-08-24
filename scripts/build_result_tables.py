@@ -59,10 +59,10 @@ def _source_maps(metrics_dir: Path):
         "ComplEx":    (metrics_dir / "traditional_sota_metrics.csv", "ComplEx"),
         "ConvE":      (metrics_dir / "traditional_sota_metrics.csv", "ConvE"),
         "TuckER":     (metrics_dir / "traditional_sota_metrics.csv", "TuckER"),
-        "Prob-CBR":   (metrics_dir / "probcbr_metrics.csv", "Prob-CBR"),
-        "AnyBURL":    (metrics_dir / "anyburl_metrics.csv", "AnyBURL"),
-        "DacKGR":     (metrics_dir / "dackgr_metrics.csv", "point.rs.conve"),
-        "HoGRN":      (metrics_dir / "hogrn_metrics.csv", "conve"),
+        "Prob-CBR":   (metrics_dir / "probcbr_sota_metrics.csv", "Prob-CBR"),
+        "AnyBURL":    (metrics_dir / "anyburl_sota_metrics.csv", "AnyBURL"),
+        "DacKGR":     (metrics_dir / "dackgr_sota_metrics.csv", "point.rs.conve"),
+        "HoGRN":      (metrics_dir / "hogrn_sota_metrics.csv", "conve"),
         "LoGRe":      (metrics_dir / "logre_sota_metrics.csv", "LoGRe"),
         "StruProKGR": (metrics_dir / "struprokgr_sota_metrics.csv", "StruProKGR"),
         "PathBSR":    (metrics_dir / "pathbsr_sota_metrics.csv", "PathBSR"),
@@ -173,7 +173,7 @@ def build_efficiency_table():
 def write_main_csv(rows, out: Path):
     cols = ["Method"] + [f"{ds}_{m}" for ds in DATASETS for m in ("MRR", "H3")]
     with out.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=cols)
+        w = csv.DictWriter(f, fieldnames=cols, lineterminator="\n")
         w.writeheader(); w.writerows(rows)
 
 
@@ -192,7 +192,7 @@ def write_efficiency_csv(rows, out: Path):
             nr[f"{ds}_raw_s"] = r[f"{ds}_raw_s"]
         renamed.append(nr)
     with out.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=cols)
+        w = csv.DictWriter(f, fieldnames=cols, lineterminator="\n")
         w.writeheader(); w.writerows(renamed)
 
 
@@ -308,7 +308,7 @@ def write_markdown(main, sota, eff, out: Path):
         "**SOTA**: tail-only, optimistic tie-breaking (MRR_Tail / Hits@3_Tail).  "
         "WD† = WD-singer (official split, exact-triple overlap caveat).  "
         "DacKGR‡ uses the preserved local WN18RR adaptation; its original paper did not report WN18RR.  "
-        "LoGRe / StruProKGR do not support WN18RR.\n",
+        "LoGRe / StruProKGR were not evaluated on WN18RR in their upstream releases.\n",
         "Top-3 per column (by MRR): **bold** (1st) / <u>underline</u> (2nd) / `code` (3rd).\n",
         _md_mrr_table(main, "Main Protocol (Bidirectional, Average-tie)"),
         "",
@@ -422,7 +422,8 @@ def write_latex(main, sota, eff, out: Path):
             main,
             r"Main protocol results (MRR / Hits@3, bidirectional filtered, average-tie). "
             r"WD\textsuperscript{†} = WD-singer. DacKGR\textsuperscript{‡} uses the preserved local "
-            r"WN18RR adaptation; the original paper did not report WN18RR. — = not supported.",
+            r"WN18RR adaptation; the original paper did not report WN18RR. "
+            r"— = not evaluated in the upstream release.",
             "tab:main",
         ),
         "",

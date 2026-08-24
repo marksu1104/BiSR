@@ -285,15 +285,23 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from metrics_csv import upsert_metrics_csv, METRICS_CSV_HEADER
 
 
-def log_final_metrics(tail_metrics, head_metrics, avg_metrics, dataset, model, split_label='test'):
+def log_final_metrics(
+    tail_metrics,
+    head_metrics,
+    avg_metrics,
+    dataset,
+    model,
+    split_label='test',
+    record_name='FINAL_EVAL_METRICS',
+):
     # metrics tuples are (hits@1, hits@3, hits@5, hits@10, mrr)
     print(
-        'FINAL_EVAL_METRICS baseline=DacKGR model={} dataset={} split={} '
+        '{} baseline=DacKGR model={} dataset={} split={} '
         'mrr_tail={:.5f} mrr_head={:.5f} mrr_avg={:.5f} '
         'h1_tail={:.5f} h1_head={:.5f} h1_avg={:.5f} '
         'h3_tail={:.5f} h3_head={:.5f} h3_avg={:.5f} '
         'h10_tail={:.5f} h10_head={:.5f} h10_avg={:.5f}'.format(
-            model, dataset, split_label,
+            record_name, model, dataset, split_label,
             tail_metrics[4], head_metrics[4], avg_metrics[4],
             tail_metrics[0], head_metrics[0], avg_metrics[0],
             tail_metrics[1], head_metrics[1], avg_metrics[1],
@@ -302,7 +310,7 @@ def log_final_metrics(tail_metrics, head_metrics, avg_metrics, dataset, model, s
     )
 
 
-def append_metrics_csv(dataset, model, tail_metrics, head_metrics, avg_metrics, seconds):
+def append_metrics_csv(dataset, model, tail_metrics, head_metrics, avg_metrics, seconds, filename='dackgr_metrics.csv'):
     if os.environ.get("DACKGR_WRITE_METRICS", "1") == "0":
         return
     output_root = os.environ.get("SPARSEKGC_OUTPUT_DIR")
@@ -311,7 +319,7 @@ def append_metrics_csv(dataset, model, tail_metrics, head_metrics, avg_metrics, 
     else:
         timing_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "timings")
     os.makedirs(timing_dir, exist_ok=True)
-    path = os.path.join(timing_dir, "dackgr_metrics.csv")
+    path = os.path.join(timing_dir, filename)
     upsert_metrics_csv(path, [
         dataset,
         model,
@@ -423,12 +431,20 @@ def inference(lf, seconds=None):
         # src.eval.hits_and_ranks(dev_data, pred_scores, lf.kg.all_objects, verbose=True)
         print('Final evaluation metrics (tail prediction):')
         pred_scores = lf.forward(test_data, verbose=False)
-        tail_metrics = src.eval.hits_and_ranks(test_data, pred_scores, lf.kg.all_objects, verbose=True, output=False, kg=lf.kg, model_name=args.model, split_relation=False)
+        # Main Protocol (average-tie) and SOTA Protocol (optimistic-tie) are both
+        # computed as full-entity filtered ranks over the SAME dense score tensor
+        # from this single forward pass -- see src.eval.hits_and_ranks_full_entity.
+        # Neither uses args.beam_size truncation (unlike the legacy
+        # src.eval.hits_and_ranks helper, which is no longer used for reported
+        # metrics because it silently drops any answer ranked beyond the beam).
+        tail_metrics = src.eval.hits_and_ranks_average_tie(test_data, pred_scores, lf.kg.all_objects, verbose=True)
+        sota_tail_metrics = src.eval.hits_and_ranks_optimistic_tie(test_data, pred_scores, lf.kg.all_objects, verbose=True)
 
         print('Final evaluation metrics (head prediction):')
         test_data_inv = [(e2, e1, lf.kg.get_inv_relation_id(r)) for (e1, e2, r) in test_data]
         pred_scores_inv = lf.forward(test_data_inv, verbose=False)
-        head_metrics = src.eval.hits_and_ranks(test_data_inv, pred_scores_inv, lf.kg.all_objects, verbose=True, output=False, kg=lf.kg, model_name=args.model, split_relation=False)
+        head_metrics = src.eval.hits_and_ranks_average_tie(test_data_inv, pred_scores_inv, lf.kg.all_objects, verbose=True)
+        sota_head_metrics = src.eval.hits_and_ranks_optimistic_tie(test_data_inv, pred_scores_inv, lf.kg.all_objects, verbose=True)
 
         avg_metrics = tuple((t + h) / 2 for t, h in zip(tail_metrics, head_metrics))
         print('Bidirectional (head+tail)/2: Hits@1={:.5f} Hits@3={:.5f} Hits@5={:.5f} Hits@10={:.5f} MRR={:.5f}'.format(*avg_metrics))
@@ -436,9 +452,20 @@ def inference(lf, seconds=None):
         for k, idx in ((1, 0), (3, 1), (10, 3)):
             print('Hits@{}: Tail : {:.5f}, Head : {:.5f}, Avg : {:.5f}'.format(
                 k, tail_metrics[idx], head_metrics[idx], avg_metrics[idx]))
+        # The SOTA protocol is tail-only (thesis Table 5); MRR_Tail/Hits@3_Tail
+        # are what scripts/build_result_tables.py reads for the SOTA table.
+        # sota_head_metrics/sota_avg_metrics are logged for completeness only.
+        sota_avg_metrics = tuple((t + h) / 2 for t, h in zip(sota_tail_metrics, sota_head_metrics))
+        print('Full-entity optimistic-tie tail-only metrics for the SOTA protocol:')
+        log_final_metrics(sota_tail_metrics, sota_head_metrics, sota_avg_metrics,
+                          os.path.basename(args.data_dir), args.model, split_label='test-sota',
+                          record_name='FINAL_SOTA_METRICS')
         log_final_metrics(tail_metrics, head_metrics, avg_metrics, os.path.basename(args.data_dir), args.model)
         if seconds is not None:
             append_metrics_csv(os.path.basename(args.data_dir), args.model, tail_metrics, head_metrics, avg_metrics, seconds)
+            append_metrics_csv(os.path.basename(args.data_dir), args.model,
+                               sota_tail_metrics, sota_head_metrics, sota_avg_metrics,
+                               seconds, filename='dackgr_sota_metrics.csv')
             print('RUNTIME_STD baseline=DacKGR model={} dataset={} seconds={:.3f}'.format(
                 args.model, os.path.basename(args.data_dir), seconds))
         eval_metrics['dev'] = {}

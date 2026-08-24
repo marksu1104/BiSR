@@ -100,7 +100,7 @@ def resolve_data_root():
     return Path(root).resolve()
 
 
-def run_one(dataset, score_func, gpu, dry_run=False):
+def run_one(dataset, score_func, gpu, dry_run=False, restore=False):
     if not Path("run.py").exists():
         raise SystemExit("run.py not found; run this script from baselines/HoGRN")
     data_root = resolve_data_root()
@@ -113,6 +113,11 @@ def run_one(dataset, score_func, gpu, dry_run=False):
         return {"status": "skipped", "seconds": 0.0}
 
     args = shlex.split(get_config(dataset, score_func))
+    if restore:
+        # Load the existing best checkpoint and only re-evaluate (no
+        # training). Requires a prior full run's checkpoint to already exist
+        # at checkpoints/{dataset}_{score_func}_best.
+        args = args + ["-restore", "-dump_errors"]
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = str(gpu)
     log_dir = baseline_output_dir()
@@ -183,6 +188,13 @@ def main():
     parser.add_argument("--score_funcs", nargs="+", default=SCORE_FUNCS, choices=SCORE_FUNCS)
     parser.add_argument("--gpu", default="0")
     parser.add_argument("--dry_run", action="store_true")
+    parser.add_argument(
+        "--restore",
+        action="store_true",
+        help="Load the existing best checkpoint and only re-evaluate (Main + "
+             "SOTA metrics), skipping training. Requires checkpoints/"
+             "{dataset}_{score_func}_best to already exist from a prior run.",
+    )
     args = parser.parse_args()
 
     # Per-dataset fault isolation: a failure in one (dataset, score_func) is
@@ -192,7 +204,7 @@ def main():
     for dataset in args.datasets:
         for score_func in args.score_funcs:
             try:
-                run_one(dataset, score_func, args.gpu, dry_run=args.dry_run)
+                run_one(dataset, score_func, args.gpu, dry_run=args.dry_run, restore=args.restore)
             except subprocess.CalledProcessError as exc:
                 print(f"FAILED | baseline=HoGRN | model={score_func} | dataset={dataset} | {exc}", flush=True)
                 failed.append((dataset, score_func))

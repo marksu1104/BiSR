@@ -39,6 +39,14 @@ BASELINE_METRICS = {
     "logre": OUTPUT_DIR / "logre_metrics.csv",
     "pathbsr": OUTPUT_DIR / "pathbsr_metrics.csv",
 }
+BASELINE_SOTA_METRICS = {
+    "dackgr": OUTPUT_DIR / "dackgr_sota_metrics.csv",
+    "probcbr": OUTPUT_DIR / "probcbr_sota_metrics.csv",
+    "anyburl": OUTPUT_DIR / "anyburl_sota_metrics.csv",
+    "hogrn": OUTPUT_DIR / "hogrn_sota_metrics.csv",
+    "logre": OUTPUT_DIR / "logre_sota_metrics.csv",
+    "struprokgr": OUTPUT_DIR / "struprokgr_sota_metrics.csv",
+}
 
 DACKGR_PROCESS_CONFIGS = {
     "WD-singer": "configs/wd-singer.sh",
@@ -165,6 +173,9 @@ def reset_metrics(baseline, dry_run=False):
     path = BASELINE_METRICS[baseline]
     if path.exists():
         path.unlink()
+    sota_path = BASELINE_SOTA_METRICS.get(baseline)
+    if sota_path is not None and sota_path.exists():
+        sota_path.unlink()
 
 
 def run_traditional(args):
@@ -198,6 +209,8 @@ def run_hogrn(args):
     ]
     if args.dry_run:
         cmd.append("--dry_run")
+    if getattr(args, "hogrn_restore", False):
+        cmd.append("--restore")
     run_command(cmd, BASE_DIR / "baselines" / "HoGRN")
 
 
@@ -219,6 +232,7 @@ def run_dackgr(args):
         ("process_data", "point", "./experiment.sh", DACKGR_PROCESS_CONFIGS, "--process_data", {"DACKGR_WRITE_METRICS": "0"}),
         ("pretrain_conve", "conve", "./experiment-emb.sh", DACKGR_CONVE_CONFIGS, "--train", {"DACKGR_WRITE_METRICS": "0"}),
         ("train_infer", "point.rs.conve", "./experiment-rs.sh", DACKGR_RS_CONFIGS, "--train", {"DACKGR_WRITE_METRICS": "1"}),
+        ("inference", "point.rs.conve", "./experiment-rs.sh", DACKGR_RS_CONFIGS, "--inference", {"DACKGR_WRITE_METRICS": "1"}),
     ]
     enabled_stages = set(args.dackgr_stages or ["process_data", "pretrain_conve", "train_infer"])
     stages = [s for s in all_stages if s[0] in enabled_stages]
@@ -254,14 +268,14 @@ def run_dackgr(args):
                         "SPARSEKGC_DACKGR_DATA_ROOT": str(data_root),
                         **env_overrides,
                     },
-                    show_summary=(stage == "train_infer"),
+                    show_summary=(stage in {"train_infer", "inference"}),
                     heartbeat_label=f"baseline=DacKGR stage={stage} model={model} dataset={dataset}",
                 )
             except subprocess.CalledProcessError as exc:
                 print(f"FAILED | baseline=DacKGR | stage={stage} | dataset={dataset} | {exc}", flush=True)
                 dataset_failed = f"{stage} (exit {exc.returncode})"
                 break
-            if stage != "train_infer":
+            if stage not in {"train_infer", "inference"}:
                 stage_status = "dry_run" if args.dry_run else "completed"
                 print(f"Time   | {timestamp()}", flush=True)
                 print(f"Done   | baseline=DacKGR | stage={stage} | status={stage_status} | dataset={dataset}", flush=True)
@@ -365,8 +379,13 @@ def main():
     parser.add_argument("--reset_metrics", action="store_true")
     parser.add_argument("--models", nargs="+", help="Traditional-only model list.")
     parser.add_argument("--max_epochs", type=int, help="Traditional-only epoch override.")
-    parser.add_argument("--dackgr_stages", nargs="+", choices=["process_data", "pretrain_conve", "train_infer"],
-                        help="DacKGR-only: run only selected stages (default: all three stages).")
+    parser.add_argument(
+        "--dackgr_stages",
+        nargs="+",
+        choices=["process_data", "pretrain_conve", "train_infer", "inference"],
+        help=("DacKGR-only: select stages (default: process, ConvE pretraining, and training; "
+              "use 'process_data inference' to evaluate existing checkpoints without training)."),
+    )
     parser.add_argument("--probcbr_data_root", help="Prob-CBR-only: root path to prob-cbr-data.")
     parser.add_argument("--probcbr_expt_root", help="Prob-CBR-only: root path for Prob-CBR experiment outputs.")
     parser.add_argument("--probcbr_only_preprocess", action="store_true",
@@ -379,6 +398,9 @@ def main():
                         help="AnyBURL-only: SNAPSHOTS_AT seconds (default: 100).")
     parser.add_argument("--struprokgr_max_programs", type=int, default=None,
                         help="StruProKGR-only: max_num_programs (default: 100).")
+    parser.add_argument("--hogrn_restore", action="store_true",
+                        help="HoGRN-only: load the existing best checkpoint and only "
+                             "re-evaluate (Main + SOTA metrics), skipping training.")
     args = parser.parse_args()
 
     if not args.dry_run:

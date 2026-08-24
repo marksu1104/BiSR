@@ -176,8 +176,8 @@ def run_one(dataset: str, args):
 
     seconds = time.perf_counter() - start
 
-    # 4. Score under main protocol (bidirectional + tie-aware)
-    res = evaluate(fwd_dump, inv_dump, data_root, dataset)
+    # 4. Score under Main Protocol (bidirectional, filtered, full-entity, average-tie)
+    res = evaluate(fwd_dump, inv_dump, data_root, dataset, tie_mode="average")
 
     final_line = (
         "FINAL_EVAL_METRICS baseline=logre model=LoGRe dataset={} split=test "
@@ -203,17 +203,21 @@ def run_one(dataset: str, args):
         f"{seconds:.3f}",
     ])
 
-    # 5b. Upsert SOTA-protocol CSV (tail-only optimistic from forward run)
-    sota = parse_sota(sota_line)
-    if sota:
-        upsert_metrics_csv(str(metrics_csv_path("_sota")), [
-            dataset, "LoGRe",
-            f"{sota.get('mrr', 0):.5f}", "—", "—",
-            f"{sota.get('h1', 0):.5f}",  "—", "—",
-            f"{sota.get('h3', 0):.5f}",  "—", "—",
-            f"{sota.get('h10', 0):.5f}", "—", "—",
-            "—",
-        ])
+    # 5b. Score under SOTA Protocol (tail-only, filtered, full-entity,
+    # optimistic-tie) directly from the same forward dump used in step 4 --
+    # NOT the legacy LOGRE_METRICS stdout line, which only ranked the gold
+    # answer within LoGRe's own returned candidate list rather than the full
+    # entity set and is therefore not a valid Full-entity-set SOTA number
+    # under thesis Table 5.
+    sota_res = evaluate(fwd_dump, None, data_root, dataset, tie_mode="optimistic")
+    upsert_metrics_csv(str(metrics_csv_path("_sota")), [
+        dataset, "LoGRe",
+        f"{sota_res['tail']['mrr']:.5f}", "—", "—",
+        f"{sota_res['tail']['h1']:.5f}",  "—", "—",
+        f"{sota_res['tail']['h3']:.5f}",  "—", "—",
+        f"{sota_res['tail']['h10']:.5f}", "—", "—",
+        f"{seconds:.3f}",
+    ])
 
     print_result(timestamp(), "logre", "LoGRe", dataset, log_file, None, final_line, seconds, "ok")
 

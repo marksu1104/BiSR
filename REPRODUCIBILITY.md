@@ -32,11 +32,11 @@ thesis and the inputs to table and figure generation.
 | Saved metrics | Producer |
 | --- | --- |
 | `traditional_metrics.csv`, `traditional_sota_metrics.csv` | `run_baseline.py traditional` and `baselines/traditional/run_all.py` |
-| `hogrn_metrics.csv` | `run_baseline.py hogrn` and `baselines/HoGRN/run_hogrn_all.py` |
-| `dackgr_metrics.csv` | `run_baseline.py dackgr` and the DacKGR experiment scripts |
-| `probcbr_metrics.csv` | `run_baseline.py probcbr` and `baselines/Prob-CBR/run_all.py` |
-| `anyburl_metrics.csv` | `run_baseline.py anyburl` and `baselines/AnyBURL/run_anyburl.py` |
-| `logre_metrics.csv`, `logre_sota_metrics.csv` | `run_baseline.py logre` and `baselines/LoGRe/run_logre.py` |
+| `hogrn_metrics.csv`, `hogrn_sota_metrics.csv` | `run_baseline.py hogrn [--hogrn_restore]` and `baselines/HoGRN/run_hogrn_all.py` |
+| `dackgr_metrics.csv`, `dackgr_sota_metrics.csv` | `run_baseline.py dackgr [--dackgr_stages ... inference]` and the DacKGR experiment scripts |
+| `probcbr_metrics.csv`, `probcbr_sota_metrics.csv` | `run_baseline.py probcbr` and `baselines/Prob-CBR/run_all.py` |
+| `anyburl_metrics.csv`, `anyburl_sota_metrics.csv` | `run_baseline.py anyburl` and `baselines/AnyBURL/run_anyburl.py` |
+| `logre_metrics.csv`, `logre_sota_metrics.csv` | `run_baseline.py logre` and `baselines/LoGRe/run_logre.py` (scoring shared with StruProKGR) |
 | `struprokgr_metrics.csv`, `struprokgr_sota_metrics.csv` | `run_baseline.py struprokgr` and `baselines/StruProKGR/run_struprokgr.py` |
 | `pathbsr_metrics.csv`, `pathbsr_sota_metrics.csv` | `run_baseline.py pathbsr` and `baselines/PathBSR/run_pathbsr.py` |
 
@@ -44,6 +44,59 @@ Output generation never invokes these producers. The saved DacKGR WN18RR metric
 is a project adaptation using the preserved legacy uniform pruning scores in
 `datasets/WN18RR/metadata/dackgr_pagerank.txt`; changing that input defines a
 new experiment and must not overwrite the saved value.
+
+### Main/SOTA evaluation semantics
+
+Both protocols are filtered and rank over the **full entity set**; they differ
+only in tie handling (Main = average-tie, SOTA = tail-only optimistic-tie).
+`scripts/ranking_metrics.py` is the shared, unit-tested (`scripts/tests/`)
+definition of both tie rules (`average_tie_rank`, `optimistic_tie_rank`,
+`rank_from_counts`) and of the sparse-candidate case (`sparse_filtered_rank`),
+which ranks a target against the complete entity universe even when a method
+only returns scores for a subset of it. Every baseline's Main and SOTA numbers
+now come from this shared logic, or from an equivalent full-entity formula
+verified against it:
+
+- **Embedding baselines** (TransE/DistMult/ComplEx/ConvE/RotatE/TuckER),
+  **HoGRN**: score every entity densely each query, so full-entity ranking is
+  immediate; Main and SOTA are computed from the same filtered score tensor in
+  one pass (`_run_eval_pass` / `predict()`), differing only in tie rule.
+- **DacKGR**: `hits_and_ranks_full_entity` (`average`/`optimistic`) ranks over
+  the complete dense score tensor returned by the model. The legacy
+  `hits_and_ranks` helper truncates ranking to `args.beam_size` (128, on every
+  dataset in this repository, all far larger than 128 entities) and is no
+  longer used to produce reported Main or SOTA metrics.
+- **Prob-CBR, AnyBURL, LoGRe, StruProKGR** return sparse per-query candidate
+  scores. An entity absent from a method's output is ranked at a
+  `default_score` of exactly 0 -- not as a convenience placeholder, but
+  because each method's own candidate score is a sum/product of non-negative
+  terms (a precision/hit-rate in `[0, 1]` times a non-negative prior or decay
+  weight), so "not returned" and "returned with score 0" are the same true
+  value under that method's own scoring semantics. This replaces two prior
+  defects: Prob-CBR's, LoGRe's, and StruProKGR's earlier SOTA numbers ranked
+  the gold answer only within the method's own returned candidate list
+  (`get_hits`/`get_rank_in_list`), never against the full entity set; LoGRe and
+  StruProKGR are re-scored for both protocols directly from the saved
+  `dump_forward.tsv` candidate dump (`score_struprokgr.py`, shared by both),
+  so no baseline needs to be re-run to fix this.
+- **PathBSR** already scores the full entity set as a dense, zero-initialized
+  vector (`np.zeros(len(all_entities))`) per query, so an unscored candidate's
+  score is genuinely 0 by construction; its Main/SOTA ranks
+  (`pathbsr/evaluation.py:filtered_rank`) required no change.
+
+Standalone DacKGR checkpoint inference (`--dackgr_stages ... inference`, no
+`--train`) uses its fixed default seed (`543`) so the stochastic path-selection
+strategy does not inherit random state from a preceding training process. This
+means a standalone inference run and the inference at the end of a full
+training run are each individually deterministic, but are not expected to
+reproduce each other bit-for-bit, since the latter's random state has been
+advanced by the training steps that preceded it; the resulting metric
+differences between the two are small (observed within roughly 1% relative on
+MRR) and are a seed/RNG-state effect, not an evaluator difference -- confirmed
+by comparing both protocols computed from the *same* forward-pass score tensor
+within a single run. HoGRN's `--hogrn_restore` flag is the analogous
+restore-and-re-evaluate-only path for HoGRN (loads
+`checkpoints/{dataset}_{score_func}_best`, skips training).
 
 ## Dataset Contract
 
