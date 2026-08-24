@@ -50,6 +50,14 @@ class ProbCBR(object):
         self.rel_ent_map = rel_ent_map
         self.num_non_executable_programs = []
         self.nearest_neighbor_1_hop = None
+        # Dedicated, explicitly-seeded generators so branch/neighbor sampling
+        # is isolated from the global np.random stream: whether cache
+        # construction (calc_precision_map) runs or is skipped no longer
+        # changes how many random draws have happened before evaluation
+        # starts, since neither generator is shared with global state or with
+        # each other's call sites.
+        self._precision_rng = np.random.default_rng(args.seed)
+        self._infer_rng = np.random.default_rng(args.seed)
 
     def set_nearest_neighbor_1_hop(self, nearest_neighbor_1_hop):
         self.nearest_neighbor_1_hop = nearest_neighbor_1_hop
@@ -96,7 +104,7 @@ class ProbCBR(object):
         entities_with_r = self.rel_ent_map[r]
         # choose randomly from this set
         # pick (k+1), if e1 is there then remove it otherwise return first k
-        nearest_entities = np.random.choice(entities_with_r, k + 1)
+        nearest_entities = self._infer_rng.choice(entities_with_r, k + 1)
         if e1 in nearest_entities:
             nearest_entities = [i for i in nearest_entities if i != e1]
         else:
@@ -168,11 +176,19 @@ class ProbCBR(object):
 
         return sorted_programs
 
-    def execute_one_program(self, e: str, path: List[str], depth: int, max_branch: int):
+    def execute_one_program(self, e: str, path: List[str], depth: int, max_branch: int, rng=None):
         """
         starts from an entity and executes the path by doing depth first search. If there are multiple edges with the same label, we consider
         max_branch number.
+
+        :param rng: numpy Generator (or the np.random module) used when a
+            branch has to be truncated to max_branch entities. Callers pass
+            an explicit, purpose-specific generator (self._precision_rng from
+            cache construction, self._infer_rng from real inference) so the
+            two contexts never share RNG state.
         """
+        if rng is None:
+            rng = self._infer_rng
         if depth == len(path):
             # reached end, return node
             return [e]
@@ -184,10 +200,10 @@ class ProbCBR(object):
             return []
         if len(next_entities) > max_branch:
             # select max_branch random entities
-            next_entities = np.random.choice(next_entities, max_branch, replace=False).tolist()
+            next_entities = rng.choice(next_entities, max_branch, replace=False).tolist()
         answers = []
         for e_next in next_entities:
-            answers += self.execute_one_program(e_next, path, depth + 1, max_branch)
+            answers += self.execute_one_program(e_next, path, depth + 1, max_branch, rng=rng)
         return answers
 
     def execute_programs(self, e: str, r: str, path_list: List[List[str]], max_branch: Optional[int] = 1000) \
@@ -216,7 +232,7 @@ class ProbCBR(object):
         for path in path_list:
             if executed_path_counter == self.args.max_num_programs:
                 break
-            ans = self.execute_one_program(e, path, depth=0, max_branch=max_branch)
+            ans = self.execute_one_program(e, path, depth=0, max_branch=max_branch, rng=self._infer_rng)
             temp = []
             if self.args.use_path_counts:
                 try:
@@ -601,7 +617,7 @@ class ProbCBR(object):
                 total_map[c][r] = {}
             paths_for_this_relation = self.args.path_prior_map_per_relation[c][r]
             for p_ctr, (path, _) in enumerate(paths_for_this_relation.items()):
-                ans = self.execute_one_program(e1, path, depth=0, max_branch=100)
+                ans = self.execute_one_program(e1, path, depth=0, max_branch=100, rng=self._precision_rng)
                 if len(ans) == 0:
                     continue
                 # execute the path get answer
@@ -717,11 +733,20 @@ def main(args):
             all_paths = pickle.load(fin)
     else:
         logger.info("Sampling subgraph around entities:")
-        unique_entities = get_unique_entities(kg_file)
+        # get_unique_entities returns a set, whose iteration order depends on
+        # Python's per-process string hash seed (PYTHONHASHSEED). Sorting
+        # fixes the order each entity is visited in so the same
+        # subgraph_rng draw always lands on the same entity across separate
+        # process runs -- otherwise two independent cold rebuilds with the
+        # same --seed would still sample different subgraphs.
+        unique_entities = sorted(get_unique_entities(kg_file))
         train_adj_list = create_adj_list(kg_file)
         all_paths = defaultdict(list)
+        # Own generator, seeded only from args.seed, so subgraph sampling
+        # never touches (or is touched by) global np.random state.
+        subgraph_rng = np.random.default_rng(args.seed)
         for ctr, e1 in enumerate(tqdm(unique_entities)):
-            paths = get_paths(args, train_adj_list, e1, max_len=args.max_path_len)
+            paths = get_paths(args, train_adj_list, e1, max_len=args.max_path_len, rng=subgraph_rng)
             if paths is None:
                 continue
             all_paths[e1] = paths
@@ -1022,13 +1047,20 @@ if __name__ == '__main__':
     parser.add_argument("--max_path_len", type=int, default=3)
     parser.add_argument("--prevent_loops", type=int, choices=[0, 1], default=1)
     parser.add_argument("--seed", type=int, default=42,
-                        help="Random seed for reproducibility (Prob-CBR uses "
-                             "np.random.choice for kNN selection and path "
-                             "branching, so this is required for repeatable runs)")
+                        help="Random seed for reproducibility. Cache construction "
+                             "(subgraph sampling, precision-map building) and real "
+                             "inference (kNN selection, path branching) each draw "
+                             "from their own np.random.default_rng(args.seed) "
+                             "instance (see ProbCBR.__init__ and main()), so whether "
+                             "a cache is warm or has to be rebuilt from scratch no "
+                             "longer changes inference-time predictions.")
 
     args = parser.parse_args()
-    # Seed globally before any np.random.choice (kNN / path branching) runs, so
-    # the whole pipeline is reproducible from this single point.
+    # Global seeding kept as a defense-in-depth default for any incidental use
+    # of the global RNG elsewhere; the reproducibility-critical paths
+    # (subgraph sampling, precision-map construction, kNN/path-branch
+    # selection at inference) all use their own dedicated, explicitly-seeded
+    # np.random.default_rng instances instead (see ProbCBR.__init__ and main()).
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)

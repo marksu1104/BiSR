@@ -47,8 +47,10 @@ new experiment and must not overwrite the saved value.
 
 ### Main/SOTA evaluation semantics
 
-Both protocols are filtered and rank over the **full entity set**; they differ
-only in tie handling (Main = average-tie, SOTA = tail-only optimistic-tie).
+Both protocols are filtered and rank over the **full entity set**. Main is
+bidirectional (tail queries plus inverse-relation head queries) with
+average-tie ranking; SOTA is tail-only with optimistic-tie ranking -- they
+differ in both prediction direction and tie handling, not tie handling alone.
 `scripts/ranking_metrics.py` is the shared, unit-tested (`scripts/tests/`)
 definition of both tie rules (`average_tie_rank`, `optimistic_tie_rank`,
 `rank_from_counts`) and of the sparse-candidate case (`sparse_filtered_rank`),
@@ -59,8 +61,11 @@ verified against it:
 
 - **Embedding baselines** (TransE/DistMult/ComplEx/ConvE/RotatE/TuckER),
   **HoGRN**: score every entity densely each query, so full-entity ranking is
-  immediate; Main and SOTA are computed from the same filtered score tensor in
-  one pass (`_run_eval_pass` / `predict()`), differing only in tie rule.
+  immediate; for a fixed query direction, Main and SOTA are computed from the
+  same filtered score tensor in one pass (`_run_eval_pass` / `predict()`),
+  differing only in tie rule. Overall, Main (bidirectional) also averages
+  this over the tail and inverse-relation head directions, while SOTA
+  (tail-only) does not -- so the two protocols differ in direction as well.
 - **DacKGR**: `hits_and_ranks_full_entity` (`average`/`optimistic`) ranks over
   the complete dense score tensor returned by the model. The legacy
   `hits_and_ranks` helper truncates ranking to `args.beam_size` (128, on every
@@ -97,6 +102,41 @@ by comparing both protocols computed from the *same* forward-pass score tensor
 within a single run. HoGRN's `--hogrn_restore` flag is the analogous
 restore-and-re-evaluate-only path for HoGRN (loads
 `checkpoints/{dataset}_{score_func}_best`, skips training).
+
+### Prob-CBR / LoGRe preprocessing determinism
+
+Prob-CBR and LoGRe each build a per-dataset cache (subgraph paths, a
+hierarchical-clustering assignment, a path-prior map, and a precision map)
+under `linkage=<value>/` the first time they run, then reuse it on later
+runs. Both `execute_one_program`'s branch-truncation sampling and the
+subgraph random walk previously drew from the global `np.random` stream
+seeded once at process start; whether the cache had to be rebuilt (which
+itself calls `execute_one_program` while computing precision) or was already
+present changed how many draws happened before real inference, so the same
+`--seed` could produce different predictions depending on cache state alone.
+Fixed by giving cache construction and real inference each their own
+`np.random.default_rng(seed)` instance, threaded explicitly through
+`execute_one_program`/`get_paths` in both `prob_cbr/pr_cbr.py` and
+`LoGRe.py`, so neither touches global state or the other's stream. Verified
+by rebuilding a deleted cache from scratch and confirming the resulting
+predictions match a run that reused the pre-existing cache, bit-for-bit,
+under the same seed.
+
+`get_unique_entities` returns a Python `set`, whose iteration order for
+string elements depends on the interpreter's per-process hash seed
+(`PYTHONHASHSEED`, unset and therefore randomized here); this let two
+*separate* cold rebuilds with the same `--seed` visit entities in a
+different order and thus sample different subgraphs. Fixed by sorting the
+entity list before the subgraph-sampling loop in both baselines. A smaller
+residual gap remains between independent cold rebuilds specifically (not
+between cold and warm use of one cache, which is exact): the sampled paths
+around each entity are also stored in a `set`, so a rare score tie at the
+`max_num_programs` ranking cutoff can still resolve differently across
+separate rebuilds. This does not affect the metrics reported here, since
+those are computed by reusing one already-built, committed cache rather than
+rebuilding it repeatedly; closing it fully would mean changing the tie-break
+rule inside path ranking itself, which is out of scope for a preprocessing
+determinism fix.
 
 ## Dataset Contract
 

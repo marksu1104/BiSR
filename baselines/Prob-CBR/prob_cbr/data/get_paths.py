@@ -23,13 +23,18 @@ ch.setFormatter(formatter)
 logger.addHandler(ch)
 
 
-def get_paths(args, train_adj_list, start_node, max_len=3):
+def get_paths(args, train_adj_list, start_node, max_len=3, rng=None):
     """
     :param start_node:
     :param K:
     :param max_len:
+    :param rng: numpy Generator (or the np.random module) used for the random
+        walk; pass an explicitly-seeded Generator so subgraph sampling doesn't
+        depend on how much of the global RNG state prior code has consumed.
     :return:
     """
+    if rng is None:
+        rng = np.random
     all_paths = set()
     for k in range(args.num_paths_to_collect):
         path = []
@@ -49,7 +54,7 @@ def get_paths(args, train_adj_list, start_node, max_len=3):
             if len(outgoing_edges) == 0:
                 break
             # pick one at random
-            out_edge_idx = np.random.choice(range(len(outgoing_edges)))
+            out_edge_idx = rng.choice(range(len(outgoing_edges)))
             out_edge = outgoing_edges[out_edge_idx]
             path.append(out_edge)
             curr_node = out_edge[1]  # assign curr_node as the node of the selected edge

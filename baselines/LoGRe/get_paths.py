@@ -13,7 +13,12 @@ import argparse
 from log import Logger
 
 # Given start node, randomly collect a maximum number of args.num_paths_to_collect paths and the hop of each path is restricted to a maximum of max_len.
-def get_paths(args, train_adj_list, start_node, max_len=3):
+# rng: numpy Generator (or the np.random module) used for the random walk;
+# pass an explicitly-seeded Generator so subgraph sampling doesn't depend on
+# how much of the global RNG state prior code has consumed.
+def get_paths(args, train_adj_list, start_node, max_len=3, rng=None):
+    if rng is None:
+        rng = np.random
     all_paths = set()
     for k in range(args.num_paths_to_collect):
         path = []
@@ -33,7 +38,7 @@ def get_paths(args, train_adj_list, start_node, max_len=3):
             if len(outgoing_edges) == 0:
                 break
             # pick one at random
-            out_edge_idx = np.random.choice(range(len(outgoing_edges)))
+            out_edge_idx = rng.choice(range(len(outgoing_edges)))
             out_edge = outgoing_edges[out_edge_idx]
             path.append(out_edge)
             curr_node = out_edge[1]  # assign curr_node as the node of the selected edge

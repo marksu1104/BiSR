@@ -9,7 +9,10 @@ Section 5.3 of the thesis:
 where k_q = number of filtered candidates with a strictly higher score than
 the target, and m_q = number of candidates tied with the target (including
 the target itself). Both protocols share the same filtering and full-entity
-universe; they differ only in how ties are broken.
+universe; the functions tested here decide only the tie-handling axis (given
+a fixed query direction). The Main and SOTA protocols overall also differ in
+query direction -- Main is bidirectional, SOTA is tail-only -- which is
+decided by the caller, not by these functions.
 """
 
 from __future__ import annotations

@@ -298,8 +298,12 @@ class Runner(object):
 
         Computes both the Main Protocol (average-tie) and SOTA Protocol
         (optimistic-tie) filtered full-entity ranks from the same dense
-        `pred` score tensor in one pass, since the two protocols share
-        identical filtering and only differ in tie handling.
+        `pred` score tensor in one pass: for this fixed `mode` (query
+        direction), the two protocols share identical filtering and differ
+        only in tie handling. Overall, Main and SOTA also differ in query
+        direction -- Main averages this over both 'tail_batch' and
+        'head_batch' calls, SOTA uses 'tail_batch' only (see
+        get_combined_results / get_combined_sota_results in helper.py).
         """
         self.model.eval()
 

@@ -38,6 +38,15 @@ class LoGRe(object):
         self.cached_programs, self.cached_siment = {}, {}
         self.cached_num_ret_nn, self.cached_zero_ctr = {}, {}
         self.cached_rank_results = {}
+        # Dedicated, explicitly-seeded generators so branch sampling is
+        # isolated from the global np.random stream: whether cache
+        # construction (calc_precision_map) runs or is skipped no longer
+        # changes how many random draws have happened before evaluation
+        # starts, since neither generator is shared with global state or with
+        # each other's call sites.
+        seed = getattr(args, "seed", 42)
+        self._precision_rng = np.random.default_rng(seed)
+        self._infer_rng = np.random.default_rng(seed)
 
     # Cluster entities according to their types
     def cluster_entities_type(self, type_file):  #dict{e: type}, dict{type: set(e)}
@@ -137,7 +146,14 @@ class LoGRe(object):
         return sorted_programs
 
     # Starting from a given entity, execute the path by doing depth-first search. If there are multiple entities with the same relation, we select up to max_branch entities.
-    def execute_one_program(self, e: str, path: List[str], depth: int, max_branch: int):
+    def execute_one_program(self, e: str, path: List[str], depth: int, max_branch: int, rng=None):
+        # rng: numpy Generator (or the np.random module) used when a branch has
+        # to be truncated to max_branch entities. Callers pass an explicit,
+        # purpose-specific generator (self._precision_rng from cache
+        # construction, self._infer_rng from real inference) so the two
+        # contexts never share RNG state.
+        if rng is None:
+            rng = self._infer_rng
         if depth == len(path):
             # reached end, return node
             return [e]
@@ -147,10 +163,10 @@ class LoGRe(object):
             return []
         if len(next_entities) > max_branch:
             # select max_branch random entities
-            next_entities = np.random.choice(next_entities, max_branch, replace=False).tolist()
+            next_entities = rng.choice(next_entities, max_branch, replace=False).tolist()
         answers = []
         for e_next in next_entities:
-            answers += self.execute_one_program(e_next, path, depth + 1, max_branch)
+            answers += self.execute_one_program(e_next, path, depth + 1, max_branch, rng=rng)
         return answers
 
     # Given an entity, relation, and path list, run execute_one_program for each path.
@@ -163,7 +179,7 @@ class LoGRe(object):
             path = path_list[i]
             if executed_path_counter == self.args.max_num_programs:
                 break
-            ans = self.execute_one_program(e, path, depth=0, max_branch=max_branch)
+            ans = self.execute_one_program(e, path, depth=0, max_branch=max_branch, rng=self._infer_rng)
             temp = []
             try:
                 path_score = self.args.precision_map[r][path] * self.args.hop_factors[len(path)]
@@ -447,7 +463,7 @@ class LoGRe(object):
             if r not in total_map[c]:
                 total_map[c][r] = {}
             for path in self.args.type_relation_paths[c][r]:
-                ans = self.execute_one_program(e1, path, depth=0, max_branch=100)
+                ans = self.execute_one_program(e1, path, depth=0, max_branch=100, rng=self._precision_rng)
                 if len(ans) == 0:
                     continue
                 # execute the path get answer
@@ -511,11 +527,20 @@ def main(args):
             all_paths = pickle.load(fin)
     else:
         args.logger.info("Sampling subgraph around entities:")
-        unique_entities = get_unique_entities(args.train_file)
+        # get_unique_entities returns a set, whose iteration order depends on
+        # Python's per-process string hash seed (PYTHONHASHSEED). Sorting
+        # fixes the order each entity is visited in so the same
+        # subgraph_rng draw always lands on the same entity across separate
+        # process runs -- otherwise two independent cold rebuilds with the
+        # same --seed would still sample different subgraphs.
+        unique_entities = sorted(get_unique_entities(args.train_file))
         train_adj_list = create_adj_list(args.train_file)
         all_paths = defaultdict(list)
+        # Own generator, seeded only from args.seed, so subgraph sampling
+        # never touches (or is touched by) global np.random state.
+        subgraph_rng = np.random.default_rng(getattr(args, "seed", 42))
         for _, e1 in enumerate(tqdm(unique_entities)):
-            paths = get_paths(args, train_adj_list, e1, max_len=args.max_path_len)
+            paths = get_paths(args, train_adj_list, e1, max_len=args.max_path_len, rng=subgraph_rng)
             if paths is None:
                 continue
             all_paths[e1] = paths
@@ -618,6 +643,14 @@ if __name__ == '__main__':
     parser.add_argument("--prevent_loops", type=int, choices=[0, 1], default=1)
     parser.add_argument("--dump_scores_file", type=str, default=None,
                         help="Write per-query dump for external bidirectional scorer")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Random seed for reproducibility. Cache construction "
+                             "(subgraph sampling, precision-map building) and real "
+                             "inference (path branching) each draw from their own "
+                             "np.random.default_rng(args.seed) instance (see "
+                             "LoGRe.__init__ and main()), so whether a cache is warm "
+                             "or has to be rebuilt from scratch no longer changes "
+                             "inference-time predictions.")
 
     args = parser.parse_args()
     log_dir = os.path.join(args.out_dir, "logs")

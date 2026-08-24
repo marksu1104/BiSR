@@ -49,8 +49,11 @@ def sparse_filtered_rank(
     arbitrary placeholder chosen for convenience. Other known correct
     answers are excluded (filtered) before ranking. ``tie_mode`` selects
     "average" (Main Protocol) or "optimistic" (SOTA Protocol) tie handling;
-    both share the same filtering and full-entity-universe logic, so the
-    two protocols differ only in how ties are broken.
+    both share the same filtering and full-entity-universe logic, so at this
+    function's level -- a single query's rank computation -- they differ
+    only in how ties are broken. The Main and SOTA protocols overall also
+    differ in query direction (Main is bidirectional, SOTA is tail-only);
+    that axis is decided by the caller, not by this function.
     """
     if tie_mode not in TIE_MODES:
         raise ValueError(f"Unsupported tie_mode={tie_mode!r}; expected one of {TIE_MODES}")

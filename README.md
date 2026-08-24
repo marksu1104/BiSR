@@ -95,7 +95,9 @@ Supply site-specific options such as `--account` or `--partition` through
 | SOTA comparison | Tail queries only | Optimistic first match | Full-entity filtered |
 
 Both protocols rank over the full entity set and share the same filtering and
-scoring; they differ only in tie handling. Sparse candidate methods (Prob-CBR,
+scoring; Main is bidirectional with average-tie ranking, SOTA is tail-only
+with optimistic-tie ranking, so they differ in both prediction direction and
+tie handling. Sparse candidate methods (Prob-CBR,
 AnyBURL, LoGRe, StruProKGR) assign score zero to entities they did not return,
 which is each method's own definition of "no evidence" (their candidate scores
 are non-negative sums), not an arbitrary placeholder. SOTA metrics are computed

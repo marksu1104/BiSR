@@ -151,10 +151,14 @@ def hits_and_ranks_full_entity(examples, scores, all_answers, tie_mode, verbose=
 
     Unlike ``hits_and_ranks`` below, this never truncates to ``args.beam_size``:
     every entity in ``scores`` (already a dense per-entity score vector from
-    the model's forward pass) participates in the rank computation. Both the
-    Main Protocol (``tie_mode="average"``) and the SOTA Protocol
-    (``tie_mode="optimistic"``) share this same full-entity, filtered logic
-    and differ only in how ties are broken -- see scripts/ranking_metrics.py.
+    the model's forward pass) participates in the rank computation. Given a
+    fixed query direction, the Main Protocol (``tie_mode="average"``) and the
+    SOTA Protocol (``tie_mode="optimistic"``) share this same full-entity,
+    filtered logic and differ, at this call, only in how ties are broken --
+    see scripts/ranking_metrics.py. The overall Main vs. SOTA protocols also
+    differ in query direction: Main is bidirectional (this function is called
+    for both the tail-query and inverse-relation head-query examples and the
+    two results are averaged), SOTA is tail-only.
     """
     assert len(examples) == scores.shape[0]
     ranks = []
